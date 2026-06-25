@@ -473,6 +473,51 @@ for num, change, why in items:
         (change, 15, INK, True, 2), (why, 12, MUTED, False)])
     y += Inches(1.0)
 
+# ============ Slide: NoSQL alternative ============
+s = prs.slides.add_slide(BLANK)
+header(s, "附錄 · NOSQL", "替代方案 — DynamoDB 風格 key 設計")
+box(s, Inches(0.6), Inches(1.65), Inches(6.0), Inches(0.6),
+    "直覺方案  PK=user_id · SK=created_at#qr_token", ANALYTICS, WHITE, 12)
+ca = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.6), Inches(2.3), Inches(6.0), Inches(1.9))
+ca.fill.solid(); ca.fill.fore_color.rgb = LIGHT; ca.line.color.rgb = LIGHT; ca.shadow.inherit = False
+bullets(s, Inches(0.8), Inches(2.45), Inches(5.6), Inches(1.7), [
+    "✅ 列出我的 QR：Query PK=user_id 天生最佳",
+    "❌ redirect 只有 token、沒 user_id → 定位不到分區",
+    ("→ 退化成 Scan O(n)，違反 <100ms（致命）", 1),
+], size=13, gap=6)
+box(s, Inches(6.85), Inches(1.65), Inches(5.9), Inches(0.6),
+    "建議  base PK=qr_token + GSI(user_id, created_at)", GREEN, WHITE, 12)
+cb = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(6.85), Inches(2.3), Inches(5.9), Inches(1.9))
+cb.fill.solid(); cb.fill.fore_color.rgb = LIGHT; cb.line.color.rgb = LIGHT; cb.shadow.inherit = False
+bullets(s, Inches(7.05), Inches(2.45), Inches(5.5), Inches(1.7), [
+    "✅ redirect：GetItem(PK=qr_token) O(1)、強一致",
+    "✅ 列我的 QR：走 GSI(PK=user_id)",
+    "qr_token 高亂度 → 均勻分區，避免 hot partition",
+    "唯一性：條件寫入 attribute_not_exists",
+], size=13, gap=5)
+nrows = [
+    ("存取模式", "SQL（現況）", "NoSQL PK=user_id", "NoSQL PK=qr_token"),
+    ("redirect 查 token", "B-tree O(log n) ✅", "Scan O(n) ❌", "GetItem O(1) ✅"),
+    ("列出我的 QR", "WHERE user_id ✅", "天生最佳 ✅", "GSI 查 ✅"),
+    ("token 唯一", "UNIQUE ✅", "需額外處理", "條件寫入 ✅"),
+]
+nt = s.shapes.add_table(len(nrows), 4, Inches(0.6), Inches(4.5), Inches(12.15), Inches(2.1)).table
+nt.columns[0].width = Inches(3.0)
+for ci in (1, 2, 3):
+    nt.columns[ci].width = Inches(3.05)
+for r in range(len(nrows)):
+    for c in range(4):
+        cell = nt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = nrows[r][c]
+        _font(run, 11, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+textbox(s, Inches(0.6), Inches(6.75), Inches(12.2), Inches(0.6),
+        [("NoSQL 先列存取模式、再決定 key；redirect（token→URL）是這個系統的第一公民。", 12, MUTED, False)])
+
 # ============ Slide 13: Status ============
 s = prs.slides.add_slide(BLANK)
 bg = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, SW, SH)
