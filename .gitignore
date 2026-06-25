@@ -1,0 +1,9 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.db
+
+# macOS / editors
+.DS_Store
+.idea/

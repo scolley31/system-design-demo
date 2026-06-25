@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QR Code Generator</title>
+<style>
+  :root { --bg:#0f1117; --card:#1a1d27; --line:#2a2f3d; --fg:#e6e8ee; --muted:#9aa1b2; --accent:#4f8cff; --danger:#ff5d6c; --ok:#3ecf8e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", system-ui, "Microsoft JhengHei", sans-serif;
+         background: var(--bg); color: var(--fg); line-height: 1.5; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input { background:#0d0f15; border:1px solid var(--line); color:var(--fg); border-radius:8px;
+          padding:10px 12px; font-size:14px; width:100%; }
+  .grow { flex: 1 1 320px; }
+  button { cursor:pointer; border:none; border-radius:8px; padding:10px 16px; font-size:14px; font-weight:600; color:#fff; background:var(--accent); }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); font-weight:500; padding:6px 12px; font-size:13px; }
+  button.danger { background:transparent; border:1px solid var(--danger); color:var(--danger); font-weight:500; padding:6px 12px; font-size:13px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .msg { margin-top:12px; font-size:13px; min-height:18px; }
+  .msg.err { color: var(--danger); }
+  .msg.ok { color: var(--ok); }
+  .list { margin-top:28px; display:grid; gap:14px; }
+  .item { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; display:flex; gap:16px; }
+  .item img { width:96px; height:96px; border-radius:8px; background:#fff; flex:0 0 auto; }
+  .meta { flex:1; min-width:0; }
+  .meta .short a { color:var(--accent); text-decoration:none; font-weight:600; font-size:15px; word-break:break-all; }
+  .meta .orig { color:var(--muted); font-size:13px; word-break:break-all; margin:2px 0 8px; }
+  .stats { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:10px; }
+  .stats b { color:var(--fg); }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .empty { color:var(--muted); text-align:center; padding:40px; }
+  .daily { margin-top:10px; font-size:12px; color:var(--muted); border-top:1px dashed var(--line); padding-top:8px; }
+  .daily span { display:inline-block; margin-right:12px; }
+  .head { display:flex; justify-content:space-between; align-items:center; margin:28px 0 4px; }
+  .head h2 { font-size:15px; margin:0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>QR Code Generator</h1>
+  <div class="sub">輸入 URL 產生動態 QR；掃描短碼經 302 導向目標，可改 / 刪 / 看掃描分析。</div>
+
+  <div class="card">
+    <div class="row">
+      <div class="grow">
+        <label>目標 URL</label>
+        <input id="url" type="text" placeholder="https://example.com/page" />
+      </div>
+      <div>
+        <label>過期時間（選填）</label>
+        <input id="expires" type="datetime-local" />
+      </div>
+      <button id="create">產生 QR</button>
+    </div>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <div class="head">
+    <h2>我的 QR Code</h2>
+    <button class="ghost" id="refresh">重新整理</button>
+  </div>
+  <div id="list" class="list"></div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const api = (p, opt) => fetch(p, opt).then(async r => {
+  const body = r.headers.get("content-type")?.includes("json") ? await r.json() : null;
+  if (!r.ok) throw new Error(body?.detail || `HTTP ${r.status}`);
+  return body;
+});
+
+function setMsg(text, kind="") { const m = $("#msg"); m.textContent = text; m.className = "msg " + kind; }
+
+function fmt(dt) { return dt ? new Date(dt).toLocaleString() : "—"; }
+
+async function createQR() {
+  const url = $("#url").value.trim();
+  if (!url) { setMsg("請輸入 URL", "err"); return; }
+  const exp = $("#expires").value;
+  const payload = { url };
+  if (exp) payload.expires_at = new Date(exp).toISOString();
+  $("#create").disabled = true;
+  setMsg("產生中…");
+  try {
+    const d = await api("/api/v1/qr/create", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload)
+    });
+    setMsg(`已建立：${d.short_url}（正規化後：${d.original_url}）`, "ok");
+    $("#url").value = ""; $("#expires").value = "";
+    await loadList();
+  } catch (e) { setMsg("建立失敗：" + e.message, "err"); }
+  finally { $("#create").disabled = false; }
+}
+
+async function loadList() {
+  const list = $("#list");
+  try {
+    const items = await api("/api/v1/qr");
+    if (!items.length) { list.innerHTML = `<div class="empty">還沒有 QR Code，先在上面建立一個。</div>`; return; }
+    list.innerHTML = "";
+    for (const it of items) list.appendChild(renderItem(it));
+  } catch (e) { list.innerHTML = `<div class="empty">載入失敗：${e.message}</div>`; }
+}
+
+function renderItem(it) {
+  const el = document.createElement("div");
+  el.className = "item";
+  el.innerHTML = `
+    <img src="${it.qr_code_url}?dimension=192" alt="QR" />
+    <div class="meta">
+      <div class="short"><a href="${it.short_url}" target="_blank" rel="noopener">${it.short_url}</a></div>
+      <div class="orig">→ ${it.original_url}</div>
+      <div class="stats">
+        <span>掃描 <b>${it.total_scans}</b> 次</span>
+        <span>建立 ${fmt(it.created_at)}</span>
+        <span>過期 ${fmt(it.expires_at)}</span>
+        <span>token <b>${it.token}</b></span>
+      </div>
+      <div class="actions">
+        <button class="ghost" data-act="copy">複製短網址</button>
+        <button class="ghost" data-act="edit">改目標 URL</button>
+        <button class="ghost" data-act="analytics">每日分析</button>
+        <button class="danger" data-act="delete">刪除</button>
+      </div>
+      <div class="daily" style="display:none"></div>
+    </div>`;
+  el.querySelector('[data-act="copy"]').onclick = () => navigator.clipboard.writeText(it.short_url);
+  el.querySelector('[data-act="edit"]').onclick = () => editQR(it.token);
+  el.querySelector('[data-act="delete"]').onclick = () => deleteQR(it.token);
+  el.querySelector('[data-act="analytics"]').onclick = () => toggleAnalytics(it.token, el.querySelector(".daily"));
+  return el;
+}
+
+async function editQR(token) {
+  const url = prompt("新的目標 URL：");
+  if (url === null) return;
+  try {
+    await api("/api/v1/qr/" + token, {
+      method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ url: url.trim() })
+    });
+    setMsg("已更新目標 URL", "ok");
+    await loadList();
+  } catch (e) { setMsg("更新失敗：" + e.message, "err"); }
+}
+
+async function deleteQR(token) {
+  if (!confirm("確定刪除這個 QR？掃描將回傳 410。")) return;
+  try {
+    await api("/api/v1/qr/" + token, { method: "DELETE" });
+    setMsg("已刪除", "ok");
+    await loadList();
+  } catch (e) { setMsg("刪除失敗：" + e.message, "err"); }
+}
+
+async function toggleAnalytics(token, box) {
+  if (box.style.display !== "none") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.textContent = "載入中…";
+  try {
+    const a = await api("/api/v1/qr/" + token + "/analytics");
+    box.innerHTML = a.scans_by_day.length
+      ? a.scans_by_day.map(d => `<span>${d.date}: <b style="color:var(--fg)">${d.count}</b></span>`).join("")
+      : "尚無掃描紀錄";
+  } catch (e) { box.textContent = "載入失敗：" + e.message; }
+}
+
+$("#create").onclick = createQR;
+$("#refresh").onclick = loadList;
+$("#url").addEventListener("keydown", e => { if (e.key === "Enter") createQR(); });
+loadList();
+</script>
+</body>
+</html>

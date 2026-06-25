@@ -1,0 +1,408 @@
+"""產生 QR Code Generator 系統設計簡報（.pptx）。
+
+從 DESIGN.md 的決策、API、架構與流程整理成投影片。
+執行：./.venv/bin/python build_ppt.py
+"""
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_CONNECTOR
+from pptx.oxml.ns import qn
+
+# ---- palette ----
+INK = RGBColor(0x0F, 0x17, 0x2A)
+MUTED = RGBColor(0x64, 0x74, 0x8B)
+ACCENT = RGBColor(0x25, 0x63, 0xEB)
+WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+LIGHT = RGBColor(0xF1, 0xF5, 0xF9)
+CLIENT = RGBColor(0x64, 0x74, 0x8B)
+GATEWAY = RGBColor(0x0E, 0xA5, 0xE9)
+APP = RGBColor(0x25, 0x63, 0xEB)
+DB = RGBColor(0x05, 0x96, 0x69)
+CACHE = RGBColor(0xDC, 0x26, 0x26)
+CDN = RGBColor(0x7C, 0x3A, 0xED)
+ANALYTICS = RGBColor(0xD9, 0x77, 0x06)
+GREEN = RGBColor(0x05, 0x96, 0x69)
+RED = RGBColor(0xDC, 0x26, 0x26)
+CJK = "PingFang TC"
+
+prs = Presentation()
+prs.slide_width = Inches(13.333)
+prs.slide_height = Inches(7.5)
+BLANK = prs.slide_layouts[6]
+SW, SH = prs.slide_width, prs.slide_height
+
+
+def _font(run, size, color, bold=False):
+    run.font.size = Pt(size)
+    run.font.color.rgb = color
+    run.font.bold = bold
+    run.font.name = CJK
+    rPr = run._r.get_or_add_rPr()
+    ea = rPr.makeelement(qn("a:ea"), {"typeface": CJK})
+    rPr.append(ea)
+
+
+def textbox(slide, x, y, w, h, lines, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP):
+    tb = slide.shapes.add_textbox(x, y, w, h)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = anchor
+    for i, (text, size, color, bold, *rest) in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = align
+        p.space_after = Pt(rest[0] if rest else 4)
+        r = p.add_run()
+        r.text = text
+        _font(r, size, color, bold)
+    return tb
+
+
+def box(slide, x, y, w, h, text, fill, fg=WHITE, size=12, bold=True, shape=MSO_SHAPE.ROUNDED_RECTANGLE):
+    sp = slide.shapes.add_shape(shape, x, y, w, h)
+    sp.fill.solid()
+    sp.fill.fore_color.rgb = fill
+    sp.line.color.rgb = fill
+    sp.shadow.inherit = False
+    tf = sp.text_frame
+    tf.word_wrap = True
+    tf.margin_top = Pt(2)
+    tf.margin_bottom = Pt(2)
+    for i, ln in enumerate(text.split("\n")):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.CENTER
+        r = p.add_run()
+        r.text = ln
+        _font(r, size, fg, bold if i == 0 else False)
+    return sp
+
+
+def arrow(slide, x1, y1, x2, y2, color=MUTED, width=1.75):
+    cn = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x1, y1, x2, y2)
+    cn.line.color.rgb = color
+    cn.line.width = Pt(width)
+    ln = cn.line._get_or_add_ln()
+    ln.append(ln.makeelement(qn("a:tailEnd"), {"type": "triangle", "w": "med", "len": "med"}))
+    return cn
+
+
+def header(slide, kicker, title):
+    bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(0.18), SH)
+    bar.fill.solid(); bar.fill.fore_color.rgb = ACCENT; bar.line.fill.background(); bar.shadow.inherit = False
+    textbox(slide, Inches(0.55), Inches(0.35), Inches(12), Inches(1.1),
+            [(kicker, 13, ACCENT, True, 2), (title, 30, INK, True)])
+
+
+def bullets(slide, x, y, w, h, items, size=15, gap=7):
+    tb = slide.shapes.add_textbox(x, y, w, h)
+    tf = tb.text_frame; tf.word_wrap = True
+    for i, it in enumerate(items):
+        lvl = 0
+        if isinstance(it, tuple):
+            it, lvl = it
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.space_after = Pt(gap)
+        p.level = lvl
+        r = p.add_run()
+        prefix = "•  " if lvl == 0 else "–  "
+        r.text = prefix + it
+        _font(r, size if lvl == 0 else size - 1, INK if lvl == 0 else MUTED, False)
+    return tb
+
+
+# ============ Slide 1: Title ============
+s = prs.slides.add_slide(BLANK)
+bg = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, SW, SH)
+bg.fill.solid(); bg.fill.fore_color.rgb = INK; bg.line.fill.background(); bg.shadow.inherit = False
+box(s, Inches(0.9), Inches(2.0), Inches(1.5), Inches(1.5), "▣", ACCENT, WHITE, 54)
+textbox(s, Inches(0.9), Inches(3.7), Inches(11.5), Inches(2.5), [
+    ("QR Code Generator", 44, WHITE, True, 6),
+    ("System Design — 架構、API 與設計決策", 20, RGBColor(0xCB, 0xD5, 0xE1), False, 10),
+    ("Dynamic QR · FastAPI 原型 · 對齊 PDF 設計題 + repo 練習", 14, MUTED, False),
+])
+
+# ============ Slide 2: Requirements ============
+s = prs.slides.add_slide(BLANK)
+header(s, "01 · REQUIREMENTS", "需求與規模")
+cols = [
+    ("功能性 (FR)", APP, [
+        "提交 URL → 回 token + QR 圖",
+        "掃描短碼 → 302 導向原始 URL",
+        "可改目標 URL / 軟刪 / 設過期",
+        "掃描分析（總數、每日）",
+        "URL 驗證：正規化 + 惡意阻擋",
+    ]),
+    ("非功能性 (NFR)", DB, [
+        "24/7 高可用 (HA)",
+        "Redirect 延遲 < 100ms",
+        "10 億 QR、1 億用戶",
+        "讀多寫少 ≈ 100:1",
+    ]),
+    ("容量估算", ANALYTICS, [
+        "1B × ~200B ≈ 200GB",
+        "≈ 5,800 redirect / 秒",
+        "1 億用戶 × 5 次/日",
+        "圖片 + redirect 為主流量",
+    ]),
+]
+cw = Inches(3.9); gap = Inches(0.25); x0 = Inches(0.6); y0 = Inches(1.8)
+for i, (title, color, items) in enumerate(cols):
+    x = x0 + i * (cw + gap)
+    box(s, x, y0, cw, Inches(0.6), title, color, WHITE, 16)
+    card = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y0 + Inches(0.7), cw, Inches(4.4))
+    card.fill.solid(); card.fill.fore_color.rgb = LIGHT; card.line.color.rgb = LIGHT; card.shadow.inherit = False
+    bullets(s, x + Inches(0.2), y0 + Inches(0.9), cw - Inches(0.4), Inches(4.0), items, size=14, gap=10)
+
+# ============ Slide 3: API ============
+s = prs.slides.add_slide(BLANK)
+header(s, "02 · API DESIGN", "API 設計")
+rows = [
+    ("方法", "路徑", "說明"),
+    ("GET", "/", "管理頁前端"),
+    ("POST", "/api/v1/qr/create", "建立 → {token, short_url, qr_code_url, original_url}"),
+    ("GET", "/r/{token}", "掃描入口：302 / 404(不存在) / 410(刪除·過期)"),
+    ("GET", "/api/v1/qr", "列出所有 QR（含掃描數，管理頁）"),
+    ("GET", "/api/v1/qr/{token}", "取得 metadata"),
+    ("PATCH", "/api/v1/qr/{token}", "改 url / expires_at（部分更新）"),
+    ("DELETE", "/api/v1/qr/{token}", "軟刪除"),
+    ("GET", "/api/v1/qr/{token}/image", "QR PNG（dimension·color·border）"),
+    ("GET", "/api/v1/qr/{token}/analytics", "掃描統計"),
+]
+tbl = s.shapes.add_table(len(rows), 3, Inches(0.6), Inches(1.7), Inches(12.1), Inches(5.0)).table
+tbl.columns[0].width = Inches(1.4); tbl.columns[1].width = Inches(4.0); tbl.columns[2].width = Inches(6.7)
+for r in range(len(rows)):
+    for c in range(3):
+        cell = tbl.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = rows[r][c]
+        _font(run, 12 if r else 13, WHITE if r == 0 else (ACCENT if c == 0 and r else INK), r == 0 or (c == 0))
+
+# ============ Slide 4: Data model ============
+s = prs.slides.add_slide(BLANK)
+header(s, "03 · DATA MODEL", "資料模型（時間一律存 UTC）")
+box(s, Inches(0.6), Inches(1.8), Inches(5.9), Inches(0.55), "url_mappings", APP, WHITE, 16)
+c1 = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.6), Inches(2.45), Inches(5.9), Inches(4.0))
+c1.fill.solid(); c1.fill.fore_color.rgb = LIGHT; c1.line.color.rgb = LIGHT; c1.shadow.inherit = False
+bullets(s, Inches(0.85), Inches(2.65), Inches(5.4), Inches(3.6), [
+    "id  (PK)",
+    "token  String(8)  UNIQUE · index",
+    "original_url  Text",
+    "created_at / updated_at",
+    "expires_at  (nullable)",
+    "is_deleted  Boolean  ← 軟刪除",
+], size=14, gap=10)
+box(s, Inches(6.85), Inches(1.8), Inches(5.9), Inches(0.55), "scan_events  (分析明細)", ANALYTICS, WHITE, 16)
+c2 = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(6.85), Inches(2.45), Inches(5.9), Inches(4.0))
+c2.fill.solid(); c2.fill.fore_color.rgb = LIGHT; c2.line.color.rgb = LIGHT; c2.shadow.inherit = False
+bullets(s, Inches(7.1), Inches(2.65), Inches(5.4), Inches(3.6), [
+    "id (PK) · token · scanned_at",
+    "user_agent · ip_address",
+    "index (token, scanned_at)",
+    "正式版 → 獨立分析庫 + 預聚合",
+    "daily_counts(token, date, count)",
+], size=14, gap=10)
+
+# ============ Slide 5: Architecture ============
+s = prs.slides.add_slide(BLANK)
+header(s, "04 · HIGH-LEVEL ARCHITECTURE", "高階架構")
+y = Inches(2.3); bh = Inches(0.95)
+b_client = box(s, Inches(0.6), y, Inches(1.8), bh, "Client\n掃描者/瀏覽器", CLIENT, WHITE, 13)
+b_gw = box(s, Inches(2.9), y, Inches(1.8), bh, "API Gateway", GATEWAY, WHITE, 13)
+b_app = box(s, Inches(5.2), y, Inches(2.4), bh, "QR Service\n(stateless, 水平擴展)", APP, WHITE, 13)
+arrow(s, Inches(2.4), y + Inches(0.47), Inches(2.9), y + Inches(0.47))
+arrow(s, Inches(4.7), y + Inches(0.47), Inches(5.2), y + Inches(0.47))
+# right-side stores
+rx = Inches(8.6); rw = Inches(4.1)
+b_cache = box(s, rx, Inches(1.5), rw, Inches(0.8), "Redis  快取\n(redirect 熱路徑, TTL)", CACHE, WHITE, 12)
+b_db = box(s, rx, Inches(2.5), rw, Inches(0.9), "Primary DB → Read Replicas\n(寫走主 · 讀走副 · failover)", DB, WHITE, 12)
+b_cdn = box(s, rx, Inches(3.55), rw, Inches(0.8), "Object Store + CDN\n(QR 圖片靜態內容)", CDN, WHITE, 12)
+b_an = box(s, rx, Inches(4.45), rw, Inches(0.8), "佇列 → 分析庫\n(非同步 scan · 預聚合)", ANALYTICS, WHITE, 12)
+ax = Inches(7.6); ay = y + Inches(0.47)
+for tb_, ty in [(b_cache, Inches(1.9)), (b_db, Inches(2.95)), (b_cdn, Inches(3.95)), (b_an, Inches(4.85))]:
+    arrow(s, ax, ay, rx, ty)
+textbox(s, Inches(0.6), Inches(6.0), Inches(12), Inches(1.0), [
+    ("讀多寫少：redirect 先打 Redis，miss 才到 DB（read replica）；QR 圖片走 CDN；scan 非同步進分析庫。", 13, MUTED, False)])
+
+# ============ Slide 6: Create flow ============
+s = prs.slides.add_slide(BLANK)
+header(s, "05 · CREATE FLOW", "建立流程")
+steps = [
+    ("① 驗證", "保守正規化\n+ 惡意/SSRF 檢查", APP),
+    ("② 生 token", "SHA-256+nonce\n→Base62→8 碼", GATEWAY),
+    ("③ 寫 DB", "直接插入\nUNIQUE 重試 ≤10", DB),
+    ("④ 暖 cache", "token→URL\n寫進 Redis", CACHE),
+    ("⑤ 生圖", "預生成 QR\n→ object store", CDN),
+    ("⑥ 回應", "token / short_url\n/ qr_code_url", ANALYTICS),
+]
+n = len(steps); bw = Inches(1.85); gap = Inches(0.18); x0 = Inches(0.55); y = Inches(2.7)
+for i, (t, d, color) in enumerate(steps):
+    x = x0 + i * (bw + gap)
+    box(s, x, y, bw, Inches(1.5), t + "\n" + d, color, WHITE, 13)
+    if i < n - 1:
+        arrow(s, x + bw, y + Inches(0.75), x + bw + gap, y + Inches(0.75))
+textbox(s, Inches(0.55), Inches(4.7), Inches(12), Inches(1.2), [
+    ("關鍵：第 ③ 步「直接插入 + UNIQUE 例外重試」取代 repo 的「先查再插」，消除高並發 race。", 14, INK, True, 6),
+    ("token 碰撞在大規模下必然發生，靠 DB UNIQUE + 重試兜底（nonce 只防『同 URL 同 token』，不防碰撞）。", 13, MUTED, False)])
+
+# ============ Slide 7: Redirect flow ============
+s = prs.slides.add_slide(BLANK)
+header(s, "06 · REDIRECT FLOW", "掃描 / Redirect 流程（< 100ms 關鍵路徑）")
+box(s, Inches(0.6), Inches(1.7), Inches(2.3), Inches(0.8), "GET /r/{token}\n掃描者瀏覽器", CLIENT, WHITE, 12)
+b_cache = box(s, Inches(3.3), Inches(1.7), Inches(2.6), Inches(0.8), "① 查 Cache (Redis)", CACHE, WHITE, 13)
+arrow(s, Inches(2.9), Inches(2.1), Inches(3.3), Inches(2.1))
+# hit path
+box(s, Inches(3.3), Inches(2.9), Inches(2.6), Inches(0.7), "命中 + 未過期", GREEN, WHITE, 12)
+# miss path
+b_db = box(s, Inches(6.4), Inches(1.7), Inches(2.7), Inches(0.8), "② miss → 查 DB\n(read replica)", DB, WHITE, 12)
+arrow(s, Inches(5.9), Inches(2.1), Inches(6.4), Inches(2.1))
+outs = [
+    ("找不到", "404", RED, Inches(9.5), Inches(1.35)),
+    ("is_deleted", "410", RED, Inches(9.5), Inches(2.25)),
+    ("已過期", "410", RED, Inches(9.5), Inches(3.15)),
+    ("正常", "③ 回填 cache", GREEN, Inches(9.5), Inches(4.05)),
+]
+for label, code, color, x, yy in outs:
+    box(s, x, yy, Inches(3.3), Inches(0.7), f"{label}  →  {code}", color, WHITE, 12)
+    arrow(s, Inches(9.1), Inches(2.1), x, yy + Inches(0.35), color=MUTED, width=1.2)
+# scan + 302
+box(s, Inches(3.3), Inches(4.9), Inches(5.8), Inches(0.8),
+    "④ 排程非同步記 scan (BackgroundTasks) → 不擋跳轉", ANALYTICS, WHITE, 12)
+box(s, Inches(3.3), Inches(5.9), Inches(5.8), Inches(0.8),
+    "⑤ 回 302  Location: 原始 URL  → 瀏覽器自動跟隨", APP, WHITE, 13)
+arrow(s, Inches(4.6), Inches(3.6), Inches(4.6), Inches(4.9), color=GREEN)
+arrow(s, Inches(11.1), Inches(4.75), Inches(9.1), Inches(5.3), color=GREEN, width=1.2)
+
+# ============ Slide 8: QR image flow ============
+s = prs.slides.add_slide(BLANK)
+header(s, "07 · QR IMAGE", "取 QR 圖片流程  ·  GET /api/v1/qr/{token}/image")
+steps = [
+    ("① 驗證 token", "找不到/已軟刪\n→ 404", APP),
+    ("② 組短碼", 'short_url =\nBASE_URL+"/r/{token}"', GATEWAY),
+    ("③④ 算矩陣", "編碼→糾錯(RS)\n→2D 模組矩陣", DB),
+    ("⑤ 算像素", "每模組→方塊\nborder=quiet zone", CDN),
+    ("⑥⑦ PNG", "BytesIO\n選填 dimension 縮放", CACHE),
+    ("⑧ 串流", "StreamingResponse\nimage/png", ANALYTICS),
+]
+n = len(steps); bw = Inches(1.9); gap = Inches(0.14); x0 = Inches(0.5); y = Inches(2.4)
+for i, (t, d, color) in enumerate(steps):
+    x = x0 + i * (bw + gap)
+    box(s, x, y, bw, Inches(1.5), t + "\n" + d, color, WHITE, 12)
+    if i < n - 1:
+        arrow(s, x + bw, y + Inches(0.75), x + bw + gap, y + Inches(0.75))
+textbox(s, Inches(0.55), Inches(4.4), Inches(12.2), Inches(2.4), [
+    ("⚠ 編進 QR 的是『不變的短碼 /r/{token}』，不是原始 URL —— dynamic QR 關鍵：改目標 URL 不需重生圖。", 14, INK, True, 8),
+    ("QR 原理：字串 → byte 編碼 → Reed-Solomon 糾錯（破損仍可掃）→ 排入矩陣（finder/timing/alignment + 遮罩）。", 13, MUTED, False, 6),
+    ("圖片是靜態內容 → 原型即時生成；正式版預生成存 object store + CDN（第 15 題）。", 13, MUTED, False, 6),
+    ("樣式參數：dimension（像素邊長）· color（hex 黑塊色）· border（quiet zone 模組數）。", 13, MUTED, False)])
+
+# ============ Slide 9: Token decision ============
+s = prs.slides.add_slide(BLANK)
+header(s, "08 · DEEP DIVE", "決策 1 — Token 生成與碰撞")
+bullets(s, Inches(0.7), Inches(1.9), Inches(11.8), Inches(5), [
+    "演算法：SHA-256(url + nonce) → Base62 → 取前 8 碼",
+    "nonce = 時間戳_重試次數，打破 SHA-256 的確定性",
+    ("作用：讓同一個 URL 每次也產生不同 token（第 4 題：不去重）", 1),
+    ("⚠ nonce 只解決『確定性』，不解決『碰撞』", 1),
+    "碰撞數學：截斷成 8 碼後空間 = 62^8 ≈ 2.18×10^14",
+    ("10 億規模下碰撞『必然』發生（預期 ~2,290 次）", 1),
+    ("7 碼 → 8 碼：空間 ×62、預期碰撞降到 1/62", 1),
+    "安全網：DB token UNIQUE + 直接插入例外重試（≤10）",
+    ("每筆插入碰撞率 ~0.0005%，重試幾乎都第 2 次成功", 1),
+], size=15, gap=8)
+
+# ============ Slide 9: Redirect-speed decisions ============
+s = prs.slides.add_slide(BLANK)
+header(s, "09 · DEEP DIVE", "決策 2 — 302、快取、非同步")
+left = [
+    "302 而非 301",
+    ("301 被瀏覽器快取 → 跳過我方 server", 1),
+    ("→ 無法改/刪/統計；故選 302 每次回源", 1),
+    "Cache：Redis（非行程內 dict）",
+    ("stateless 多台共享 + 全域 invalidation", 1),
+    ("行程內 dict 會讓 PATCH/DELETE 失效漏清", 1),
+    ("含 TTL 作最終一致性保險", 1),
+]
+right = [
+    "Scan 非同步寫",
+    ("redirect 是 <100ms + ~5,800 QPS 熱路徑", 1),
+    ("分析可容忍延遲/少量遺失 → 不擋跳轉", 1),
+    ("原型 BackgroundTasks；正式版佇列+worker", 1),
+    "token index",
+    ("避免全表掃描，redirect 直接命中", 1),
+]
+bullets(s, Inches(0.7), Inches(1.9), Inches(6.0), Inches(5), left, size=14, gap=8)
+bullets(s, Inches(6.9), Inches(1.9), Inches(6.0), Inches(5), right, size=14, gap=8)
+
+# ============ Slide 10: Reliability / data ============
+s = prs.slides.add_slide(BLANK)
+header(s, "10 · DEEP DIVE", "決策 3 — 可靠性與資料語意")
+bullets(s, Inches(0.7), Inches(1.9), Inches(11.8), Inches(5), [
+    "軟刪除（is_deleted）：支撐 410 語意、保留分析、避免 token 回收風險",
+    "錯誤語意：404（從未存在） vs 410（曾存在已刪/過期）",
+    ("掃描路徑刪除回 410；管理 API 已刪回 404（刻意差異）", 1),
+    "惰性過期 + cron 兜底：掃描即時檢查過期；cron 清過期/通知未點擊/物理清理",
+    "URL 保守正規化：只 lower-case host，保留 path/query 與原 scheme",
+    ("修正 repo 的整串小寫（破壞 path）+ 強制 https（導向失效站）", 1),
+    "惡意阻擋：黑名單 + SSRF/內網位址（localhost·127.*·私網），正式版接 Safe Browsing",
+], size=15, gap=9)
+
+# ============ Slide 11: Scaling ============
+s = prs.slides.add_slide(BLANK)
+header(s, "11 · SCALING", "擴展策略")
+bullets(s, Inches(0.7), Inches(1.9), Inches(11.8), Inches(5), [
+    "App server stateless → 增加 instance 水平擴展（cache 外置 Redis）",
+    "DB：單 primary + 多 read replica（讀走副）+ primary 掛 failover 升主",
+    ("複寫延遲：create 後暖 cache 緩解", 1),
+    "分片：以 token hash 為鍵（均勻），列為未來選項（200GB 目前單機足夠）",
+    "QR 圖片：object store + CDN（靜態內容，目標 URL 改不需重生圖）",
+    "分析：佇列 → 獨立分析庫 + 預聚合每日計數表",
+    "清理 cron：清過期 / 通知後刪長期未點擊 / 物理清理超期軟刪 + invalidate cache",
+], size=15, gap=9)
+
+# ============ Slide 12: Improvements over repo ============
+s = prs.slides.add_slide(BLANK)
+header(s, "12 · IMPROVEMENTS", "對參考 repo 的關鍵改良")
+items = [
+    ("①", "先查再插 → 直接插入 + UNIQUE 例外重試", "消除高並發 race"),
+    ("②", "行程內 dict cache → Redis", "stateless 一致性（invalidation 全域生效）"),
+    ("③", "同步寫 scan → 非同步", "不擋 redirect 關鍵路徑"),
+    ("④", "整串小寫 → 保守正規化", "避免破壞 path 大小寫 / 導向失效站"),
+    ("＋", "token 7 碼 → 8 碼", "碰撞預期 ×1/62"),
+]
+y = Inches(1.85)
+for num, change, why in items:
+    box(s, Inches(0.7), y, Inches(0.7), Inches(0.8), num, ACCENT, WHITE, 18)
+    card = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(1.55), y, Inches(11.1), Inches(0.8))
+    card.fill.solid(); card.fill.fore_color.rgb = LIGHT; card.line.color.rgb = LIGHT; card.shadow.inherit = False
+    textbox(s, Inches(1.8), y + Inches(0.08), Inches(10.7), Inches(0.7), [
+        (change, 15, INK, True, 2), (why, 12, MUTED, False)])
+    y += Inches(1.0)
+
+# ============ Slide 13: Status ============
+s = prs.slides.add_slide(BLANK)
+bg = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, SW, SH)
+bg.fill.solid(); bg.fill.fore_color.rgb = INK; bg.line.fill.background(); bg.shadow.inherit = False
+textbox(s, Inches(0.9), Inches(1.2), Inches(11.5), Inches(1.2), [
+    ("原型狀態", 16, ACCENT, True, 4), ("可跑的 FastAPI 實作 + 管理頁前端", 30, WHITE, True)])
+bullets_dark = [
+    "7 個 API 端點 + 管理頁前端（建立/清單/編輯/刪除/分析）",
+    "全部 curl 驗證通過：302 / 404 / 410 / 8 碼 token / 正規化 / SSRF / 過期",
+    "production 替換點已在程式註解標明（Redis / 佇列 / CDN / 預聚合 / PostgreSQL）",
+    "設計依據：DESIGN.md（16 題決策 + 優劣分析）",
+]
+tb = s.shapes.add_textbox(Inches(0.9), Inches(3.0), Inches(11.5), Inches(3))
+tf = tb.text_frame; tf.word_wrap = True
+for i, it in enumerate(bullets_dark):
+    p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+    p.space_after = Pt(12)
+    r = p.add_run(); r.text = "✓  " + it
+    _font(r, 16, RGBColor(0xE2, 0xE8, 0xF0), False)
+
+prs.save("QR_Code_Generator.pptx")
+print("saved QR_Code_Generator.pptx ·", len(prs.slides._sldIdLst), "slides")
