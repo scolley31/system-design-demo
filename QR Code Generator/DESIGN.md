@@ -68,6 +68,30 @@
 
 **分析（獨立）**：明細 `scan_events(token, scanned_at, user_agent, ip)`（量大時分庫/歸檔）+ 預聚合 `daily_counts(token, date, count)`，`/analytics` 只讀聚合表。
 
+完整 DDL 見專案 `schema.sql`（ORM `app/models.py` 為 source of truth）：
+
+```sql
+CREATE TABLE url_mappings (
+    id            INTEGER      NOT NULL PRIMARY KEY,
+    token         VARCHAR(8)   NOT NULL,              -- 8 碼 Base62 短碼
+    original_url  TEXT         NOT NULL,              -- 正規化後 URL
+    created_at    DATETIME     NOT NULL,
+    updated_at    DATETIME     NOT NULL,
+    expires_at    DATETIME         NULL,              -- 可選過期（惰性過期）
+    is_deleted    BOOLEAN      NOT NULL DEFAULT 0     -- 軟刪除
+);
+CREATE UNIQUE INDEX ix_url_mappings_token ON url_mappings (token);  -- UNIQUE 兼 redirect 查找索引
+
+CREATE TABLE scan_events (
+    id          INTEGER      NOT NULL PRIMARY KEY,
+    token       VARCHAR(8)   NOT NULL,
+    scanned_at  DATETIME     NOT NULL,
+    user_agent  VARCHAR(500)     NULL,
+    ip_address  VARCHAR(45)      NULL
+);
+CREATE INDEX idx_token_scanned ON scan_events (token, scanned_at);  -- 分析複合索引
+```
+
 ---
 
 # 逐題討論與優劣
@@ -123,6 +147,21 @@
 **(d) user_id**：已有 nonce 保證每次不同，**不加 user_id**（token 不帶用戶資訊，隱私較佳）。
 
 **定案**：SHA-256+nonce+Base62、**8 碼**、不加 user_id。
+
+**(e) Hash → Encode 實作拆解**
+
+```
+"url" + nonce ──.encode()──► bytes(UTF-8) ──sha256().digest()──► 32 bytes
+   ──int.from_bytes(big)──► 256-bit 大整數 ──base62 除62取餘──► ~43 字元 ──[:8]──► token
+```
+
+- **Hash（攪亂）**：`sha256(...).digest()` 把任意輸入壓成固定 32 bytes 指紋；確定性、雪崩、單向。`.digest()` 回原始 bytes（`.hexdigest()` 則回 64 字元 hex）。
+- **Encode（變可讀短碼）**：`int.from_bytes(data,"big")` 把 32 bytes 當一個大整數，再**不斷除以 62、記餘數**轉成 62 進位（餘數 0–61 對映 `0-9a-zA-Z`）；`reversed` 因餘數從最低位算起。選 Base62 而非 Base64：不含 `/ + =`，URL 安全。
+- **截斷**：62^43 ≈ 2^256，取前 8 碼把空間砍到 62^8 ≈ 2.18×10^14（碰撞即源於此）。
+
+⚠ 程式裡有**兩個 encode** 別混淆：`(url+nonce).encode()` 是字元編碼（文字→bytes，給 hash 吃）；`base62_encode()` 是 bytes→可讀文字（給網址用）。
+
+小範例（除 62 取餘）：整數 `3842` → `3842÷62 = 商61 餘60 → 'Y'`、`61÷62 = 商0 餘61 → 'Z'` → reversed → `"ZY"`。
 
 ## 第 4 題：同 URL 去重
 
@@ -372,6 +411,25 @@ redirect 回應碼矩陣：
 | token 從沒存在 | DB 查無 | 404 |
 | 已軟刪除 | DB `is_deleted` | 410 |
 | 已過期 | DB `expires_at < now` | 410 |
+
+**redirect < 100ms：兩層查找 + 索引**
+
+```
+掃描 → ① cache.get(token)          記憶體/Redis，O(1)，<1ms
+          命中 → 回 302  ✅ 絕大多數請求停在這、完全不碰 DB
+          miss → ② SELECT ... WHERE token=?   走 ix_url_mappings_token，O(log n)
+                   → 回填 cache → 回 302
+        scan 記錄非同步（BackgroundTasks），不算進這條延遲
+```
+
+- **第 1 層 Cache**（`app/cache.py`、`routes.py` redirect 第一段）：熱門 token 命中即回，免查 DB；原型記憶體 dict、正式版 Redis（第 7 題）。
+- **第 2 層 Indexed DB**（`routes.py` 的 `filter(UrlMapping.token == token)`）：cache miss 才查；token 有 **UNIQUE B-tree 索引 `ix_url_mappings_token`**，10 億筆也是 O(log n) 次定位，而非全表掃描 O(n)。
+
+| | 無索引 | 有索引（現況） |
+|---|---|---|
+| 查 1 個 token（10 億筆） | 全表掃描 O(n)，數秒 | B-tree seek O(log n)，次毫秒 |
+
+三道防線共同保 <100ms：cache 擋掉多數讀（第 7 題）＋ token 索引讓 miss 也快（第 2 題）＋ scan 非同步不擋路（第 8 題）；正式版再加 read replica 分攤讀流量（第 16 題）。
 
 **更新/刪除**：改 DB(primary) → invalidate Redis。
 

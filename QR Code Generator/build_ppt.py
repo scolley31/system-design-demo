@@ -208,6 +208,50 @@ bullets(s, Inches(7.1), Inches(2.65), Inches(5.4), Inches(3.6), [
     "daily_counts(token, date, count)",
 ], size=14, gap=10)
 
+# ============ Slide: DB Schema ============
+def codebox(slide, x, y, w, h, code, size=11):
+    sp = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h)
+    sp.fill.solid(); sp.fill.fore_color.rgb = LIGHT; sp.line.color.rgb = LIGHT; sp.shadow.inherit = False
+    tf = sp.text_frame; tf.word_wrap = True
+    tf.margin_left = Pt(12); tf.margin_right = Pt(6); tf.margin_top = Pt(8)
+    for i, line in enumerate(code.split("\n")):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.space_after = Pt(1)
+        r = p.add_run(); r.text = line if line else " "
+        r.font.size = Pt(size); r.font.name = "Menlo"
+        r.font.color.rgb = MUTED if line.strip().startswith("--") else INK
+    return sp
+
+s = prs.slides.add_slide(BLANK)
+header(s, "03b · DB SCHEMA", "資料庫 Schema (DDL) · schema.sql")
+ddl1 = """CREATE TABLE url_mappings (
+  id            INTEGER  PRIMARY KEY,
+  token         VARCHAR(8)   NOT NULL,
+  original_url  TEXT     NOT NULL,
+  created_at    DATETIME NOT NULL,
+  updated_at    DATETIME NOT NULL,
+  expires_at    DATETIME     NULL,
+  is_deleted    BOOLEAN  NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX ix_url_mappings_token
+  ON url_mappings (token);"""
+ddl2 = """CREATE TABLE scan_events (
+  id          INTEGER  PRIMARY KEY,
+  token       VARCHAR(8)   NOT NULL,
+  scanned_at  DATETIME NOT NULL,
+  user_agent  VARCHAR(500) NULL,
+  ip_address  VARCHAR(45)  NULL
+);
+CREATE INDEX idx_token_scanned
+  ON scan_events (token, scanned_at);"""
+codebox(s, Inches(0.6), Inches(1.75), Inches(6.05), Inches(3.5), ddl1)
+codebox(s, Inches(6.9), Inches(1.75), Inches(5.85), Inches(3.5), ddl2)
+bullets(s, Inches(0.6), Inches(5.45), Inches(12.3), Inches(1.7), [
+    "token：8 碼 Base62；UNIQUE 索引兼碰撞安全網（第 5 題）+ redirect O(log n) 查找（第 2 題）",
+    "is_deleted 軟刪除（第 12 題）· expires_at 惰性過期（第 13 題）· 時間一律存 UTC",
+    "scan_events：分析明細 + 複合索引；正式版改獨立分析庫 + 預聚合（第 14 題）",
+], size=13, gap=6)
+
 # ============ Slide 5: Architecture ============
 s = prs.slides.add_slide(BLANK)
 header(s, "04 · HIGH-LEVEL ARCHITECTURE", "高階架構")
@@ -278,6 +322,25 @@ box(s, Inches(3.3), Inches(5.9), Inches(5.8), Inches(0.8),
 arrow(s, Inches(4.6), Inches(3.6), Inches(4.6), Inches(4.9), color=GREEN)
 arrow(s, Inches(11.1), Inches(4.75), Inches(9.1), Inches(5.3), color=GREEN, width=1.2)
 
+# ============ Slide: Latency / two-layer lookup ============
+s = prs.slides.add_slide(BLANK)
+header(s, "06b · LATENCY", "redirect < 100ms — 兩層查找 + 索引")
+box(s, Inches(0.6), Inches(2.05), Inches(2.4), Inches(0.9), "掃描\nGET /r/{token}", CLIENT, WHITE, 13)
+box(s, Inches(3.5), Inches(2.05), Inches(3.35), Inches(0.9), "① Cache (Redis)\nO(1) · <1ms", CACHE, WHITE, 13)
+arrow(s, Inches(3.0), Inches(2.5), Inches(3.5), Inches(2.5))
+box(s, Inches(3.5), Inches(3.25), Inches(3.35), Inches(0.8), "命中 → 302 ✅ 不碰 DB", GREEN, WHITE, 12)
+arrow(s, Inches(5.17), Inches(2.95), Inches(5.17), Inches(3.25), color=GREEN, width=1.2)
+box(s, Inches(7.35), Inches(2.05), Inches(5.4), Inches(0.9), "② miss → SELECT WHERE token=?\n走 ix_url_mappings_token · O(log n)", DB, WHITE, 12)
+arrow(s, Inches(6.85), Inches(2.5), Inches(7.35), Inches(2.5))
+box(s, Inches(7.35), Inches(3.25), Inches(5.4), Inches(0.8), "回填 cache → 302", APP, WHITE, 12)
+arrow(s, Inches(10.05), Inches(2.95), Inches(10.05), Inches(3.25), color=MUTED, width=1.2)
+bullets(s, Inches(0.6), Inches(4.5), Inches(12.3), Inches(2.6), [
+    "索引對比（查 1 個 token、10 億筆）：無索引 = 全表掃描 O(n)，數秒；有索引 = B-tree O(log n)，次毫秒",
+    "scan 記錄非同步（BackgroundTasks），不算進這條延遲",
+    "三道防線：cache 擋多數讀（第 7 題）+ token 索引讓 miss 也快（第 2 題）+ scan 非同步不擋路（第 8 題）",
+    "正式版再加 read replica 分攤 ~5,800 QPS（第 16 題）",
+], size=14, gap=8)
+
 # ============ Slide 8: QR image flow ============
 s = prs.slides.add_slide(BLANK)
 header(s, "07 · QR IMAGE", "取 QR 圖片流程  ·  GET /api/v1/qr/{token}/image")
@@ -315,6 +378,32 @@ bullets(s, Inches(0.7), Inches(1.9), Inches(11.8), Inches(5), [
     "安全網：DB token UNIQUE + 直接插入例外重試（≤10）",
     ("每筆插入碰撞率 ~0.0005%，重試幾乎都第 2 次成功", 1),
 ], size=15, gap=8)
+
+# ============ Slide: Token internals (Hash -> Encode) ============
+s = prs.slides.add_slide(BLANK)
+header(s, "08b · TOKEN INTERNALS", "Token 實作 — Hash → Encode")
+stages = [
+    ("url + nonce", "字串", CLIENT),
+    (".encode()", "→ bytes (UTF-8)", GATEWAY),
+    ("sha256().digest()", "→ 32 bytes 指紋", APP),
+    ("int.from_bytes", "→ 256-bit 大整數", DB),
+    ("base62 ÷62 取餘", "→ ~43 字元", CDN),
+    ("[:8]", "→ token", ANALYTICS),
+]
+n = len(stages); bw = Inches(1.9); gap = Inches(0.13); x0 = Inches(0.5); y = Inches(2.25)
+for i, (t, d, color) in enumerate(stages):
+    x = x0 + i * (bw + gap)
+    box(s, x, y, bw, Inches(1.3), t + "\n" + d, color, WHITE, 12)
+    if i < n - 1:
+        arrow(s, x + bw, y + Inches(0.65), x + bw + gap, y + Inches(0.65))
+bullets(s, Inches(0.6), Inches(3.95), Inches(12.2), Inches(3), [
+    "Hash（攪亂）：sha256(...).digest() 壓成固定 32 bytes 指紋 — 確定性·雪崩·單向（.hexdigest() 則回 64 字元 hex）",
+    "Encode（變短碼）：大整數不斷 ÷62 記餘數 → 餘數 0–61 對映 0-9a-zA-Z；reversed 因餘數從最低位算起",
+    ("選 Base62 而非 Base64：不含 / + = → URL 安全", 1),
+    "截斷：62^43 ≈ 2^256，取前 8 碼 → 空間砍到 62^8（碰撞源於此）",
+    "⚠ 兩個 encode：(url+nonce).encode() 是文字→bytes；base62_encode() 是 bytes→文字",
+    "範例：3842 → 餘60='Y'、餘61='Z' → reversed → \"ZY\"",
+], size=13, gap=7)
 
 # ============ Slide 9: Redirect-speed decisions ============
 s = prs.slides.add_slide(BLANK)
