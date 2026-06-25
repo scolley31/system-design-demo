@@ -454,6 +454,37 @@ bullets(s, Inches(0.7), Inches(1.9), Inches(11.8), Inches(5), [
     "清理 cron：清過期 / 通知後刪長期未點擊 / 物理清理超期軟刪 + invalidate cache",
 ], size=15, gap=9)
 
+# ============ Slide: Read-heavy -> Read Replica ============
+s = prs.slides.add_slide(BLANK)
+header(s, "11b · READ REPLICA", "Read-heavy → 讀寫分離 + Read Replica")
+textbox(s, Inches(0.6), Inches(1.8), Inches(6.0), Inches(3.2), [
+    ("容量：1B × 200B = 200GB（單機放得下）", 15, INK, False, 8),
+    ("讀流量：1 億 users × 5/日 = 5 億 redirects/日", 15, INK, False, 4),
+    ("            5 億 ÷ 86,400s ≈ 5,787 redirects/秒", 16, ACCENT, True, 8),
+    ("讀寫比：≈ 100:1（讀 ≫ 寫）", 15, INK, False, 12),
+    ("→ 瓶頸是「讀吞吐」、不是容量", 15, INK, True, 4),
+    ("→ 讀寫分離 + 多個 read replica", 16, GREEN, True),
+])
+# topology
+b_app = box(s, Inches(6.7), Inches(2.5), Inches(1.8), Inches(1.0), "App\n(stateless)", APP, WHITE, 13)
+box(s, Inches(9.4), Inches(1.9), Inches(3.3), Inches(0.8), "Primary (Write)", DB, WHITE, 13)
+box(s, Inches(9.4), Inches(2.95), Inches(3.3), Inches(0.65), "Read Replica 1", GATEWAY, WHITE, 12)
+box(s, Inches(9.4), Inches(3.75), Inches(3.3), Inches(0.65), "Read Replica 2", GATEWAY, WHITE, 12)
+box(s, Inches(9.4), Inches(4.55), Inches(3.3), Inches(0.65), "Read Replica N", GATEWAY, WHITE, 12)
+arrow(s, Inches(8.5), Inches(2.8), Inches(9.4), Inches(2.3), color=RED, width=1.6)         # 寫
+arrow(s, Inches(8.5), Inches(3.15), Inches(9.4), Inches(3.27), color=GREEN, width=1.4)     # 讀
+arrow(s, Inches(8.5), Inches(3.3), Inches(9.4), Inches(4.07), color=GREEN, width=1.4)
+arrow(s, Inches(8.5), Inches(3.4), Inches(9.4), Inches(4.87), color=GREEN, width=1.4)
+textbox(s, Inches(8.35), Inches(2.25), Inches(1.0), Inches(0.3), [("寫", 12, RED, True)])
+textbox(s, Inches(8.3), Inches(3.5), Inches(1.0), Inches(0.3), [("讀", 12, GREEN, True)])
+arrow(s, Inches(11.05), Inches(2.7), Inches(11.05), Inches(2.95), color=MUTED, width=1.1)  # 複寫
+textbox(s, Inches(11.2), Inches(2.62), Inches(1.6), Inches(0.3), [("非同步複寫", 10, MUTED, False)])
+bullets(s, Inches(0.6), Inches(5.5), Inches(12.3), Inches(1.7), [
+    "寫走 primary、讀走 replica（load-balanced）；讀不夠就加 replica 水平擴讀",
+    "配合 Redis cache，真正打到 DB 的讀已先被擋掉一大半",
+    "failover：primary 掛 → 升一台 read replica 為新 primary；複寫延遲靠 create 後暖 cache 緩解",
+], size=13, gap=6)
+
 # ============ Slide 12: Improvements over repo ============
 s = prs.slides.add_slide(BLANK)
 header(s, "12 · IMPROVEMENTS", "對參考 repo 的關鍵改良")
@@ -517,6 +548,43 @@ for r in range(len(nrows)):
         _font(run, 11, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
 textbox(s, Inches(0.6), Inches(6.75), Inches(12.2), Inches(0.6),
         [("NoSQL 先列存取模式、再決定 key；redirect（token→URL）是這個系統的第一公民。", 12, MUTED, False)])
+
+# ============ Slide: CDN edge redirect variant ============
+s = prs.slides.add_slide(BLANK)
+header(s, "附錄 · CDN EDGE", "CDN 邊緣 redirect 變體（可選最佳化）")
+textbox(s, Inches(0.6), Inches(1.5), Inches(12.2), Inches(0.6), [
+    ("主設計選擇不快取 redirect（回源保即時改/刪 + 分析）。302 與 CDN 無因果——302 仍可設短 TTL 讓 CDN 快取；", 12, MUTED, False, 2),
+    ("真正取捨是「快取 redirect vs 即時性/分析」。本變體：熱門 token 的 302 設短 TTL、邊緣直接跳，換更低延遲。", 12, MUTED, False)])
+box(s, Inches(0.6), Inches(2.2), Inches(2.2), Inches(0.95), "掃描者\nGET /r/{token}", CLIENT, WHITE, 12)
+box(s, Inches(3.3), Inches(2.1), Inches(3.6), Inches(1.15),
+    "CDN Edge（近使用者）\nedge cache: token→URL\n短 TTL（例 60s）", CDN, WHITE, 12)
+arrow(s, Inches(2.8), Inches(2.65), Inches(3.3), Inches(2.65))
+box(s, Inches(3.3), Inches(3.65), Inches(3.6), Inches(0.85),
+    "命中 → CDN 直接回 302\n不回源 · 最低延遲", GREEN, WHITE, 12)
+arrow(s, Inches(5.1), Inches(3.25), Inches(5.1), Inches(3.65), color=GREEN, width=1.3)
+box(s, Inches(7.3), Inches(2.25), Inches(5.4), Inches(0.95),
+    "miss → 回源 Service\n→ Cache/DB → 回 302（CDN 記短 TTL）", DB, WHITE, 12)
+arrow(s, Inches(6.9), Inches(2.65), Inches(7.3), Inches(2.65))
+nrows = [
+    ("面向", "主設計（回源 + Redis）", "CDN 邊緣變體"),
+    ("延遲", "低（回源 + Redis）", "最低（邊緣直接跳）"),
+    ("改 / 刪即時性", "立即生效", "TTL 內延遲"),
+    ("掃描分析", "每次都記", "TTL 內漏記"),
+]
+nt = s.shapes.add_table(len(nrows), 3, Inches(0.6), Inches(4.75), Inches(12.15), Inches(2.0)).table
+nt.columns[0].width = Inches(3.0); nt.columns[1].width = Inches(4.55); nt.columns[2].width = Inches(4.6)
+for r in range(len(nrows)):
+    for c in range(3):
+        cell = nt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = nrows[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+textbox(s, Inches(0.6), Inches(6.85), Inches(12.2), Inches(0.5), [
+    ("預設不採用；列為超高流量、目標穩定的熱門 QR 之可選最佳化（短 TTL 控制誤差）。", 12, MUTED, False)])
 
 # ============ Slide 13: Status ============
 s = prs.slides.add_slide(BLANK)

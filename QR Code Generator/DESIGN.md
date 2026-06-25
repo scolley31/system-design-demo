@@ -322,7 +322,32 @@ repo 做 `url.lower().rstrip("/")` + 強制 http→https。
 
 **(a) 單機夠**：200GB 不大，瓶頸在讀 QPS 非容量 → 先不分片。
 
-**(b) read replica**：讀走 replica、寫走 primary；primary 掛 failover 升主；複寫延遲靠 create 後暖 cache 緩解。
+**(b) read replica（read-heavy 的核心手段）**：
+
+為什麼需要 replica，從數字看：
+
+```
+容量：     1B × 200 bytes = 200GB                （單機放得下，瓶頸不在容量）
+讀流量：   100,000,000 users × 5 redirects/day = 500,000,000 redirects/day
+           500,000,000 / 86,400s ≈ 5,787 redirects/sec
+讀寫比：   ≈ 100:1（redirect/查詢 遠多於 create/update/delete）
+```
+
+200GB 單機裝得下，但**~5,800 QPS 的讀**全壓在一台 primary 上會先撐不住——瓶頸是**讀吞吐**，不是容量。read-heavy 的標準解法就是**讀寫分離 + 多個 read replica**：
+
+```
+   寫（create / update / delete）
+App ───────────────────────────────►  Primary (Write)
+ │                                        │ 非同步複寫
+ │  讀（redirect / get，load-balanced）    ├──►  Read Replica 1
+ └─────────────────────────────────────── ┼──►  Read Replica 2
+                                          └──►  Read Replica N
+```
+
+- **寫走 primary、讀走 replica**：把高頻的讀分散到多台 replica，水平擴讀。
+- **再加 N 台只擴讀**：讀不夠就加 replica；配合 Redis cache，真正打到 DB 的讀已先被擋掉一大半。
+- **容錯 failover**：primary 掛掉時把一台 read replica 升為新 primary。
+- **複寫延遲(replication lag)**：replica 是非同步跟上的，剛 create 完立刻去 replica 查可能讀不到 → 靠 create 後**暖 cache**緩解，或關鍵讀走 primary。
 
 **(c) 分片**：寫入/資料超單 primary 才需要，分片鍵選 token（hash 均勻），代價是跨片查詢+運維 → 列未來選項。
 
@@ -534,3 +559,42 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 | 水平擴展 | 需分片（第 16 題） | 自動分區 ✅ | 自動分區 ✅ |
 
 **結論**：`PK=user_id` 對「管理我的 QR」最佳，卻漏掉系統第一公民——按 token redirect。應以 **base PK=qr_token** 為主、user 清單放 **GSI(PK=user_id, SK=created_at)**。
+
+---
+
+## 附錄 B：CDN 邊緣 redirect 變體（可選最佳化）
+
+主設計**選擇不快取 redirect**：每次回源才能即時反映改/刪、並記錄每次掃描，因此 redirect 不放 CDN 邊緣；CDN 只服務靜態 QR 圖片。
+
+⚠ 釐清：這與「302 vs CDN」**無因果關係**——302 只是狀態碼，本身**可以**被 CDN 快取（明確設 `Cache-Control: public, max-age=N` 即可）。真正的取捨是「**快取 redirect** vs **即時性/分析**」，跟用 301 還 302 無關。301 vs 302 是**瀏覽器**預設快取行為（第 6 題），CDN 快取是另一層。
+
+本變體就是把那個取捨倒過來：對熱門 token 的 302 設**短 TTL**、讓 CDN 邊緣直接跳轉，用分析準確度與改/刪即時性換更低延遲（即 PDF 說的「redirection 在 CDN 完成」）：
+
+```
+            GET /r/{token}
+   ┌──────────┐
+   │ 掃描者    │ ──────────────┐
+   │ 瀏覽器    │ ◄─────────┐   │
+   └──────────┘   302      │   ▼
+        │ 跟隨 302         │  ┌───────────────────────────┐
+        ▼                  │  │   CDN Edge（近使用者）      │
+     目標頁                │  │  edge cache: token→URL      │
+                           │  │  短 TTL（例：60s）          │
+                           │  └───────────────────────────┘
+                           │      命中│              miss│
+                           │          │                  ▼
+                           └── CDN 直接回 302      回源到我們 Service
+                               (不回源,最低延遲)    → Cache/DB → 回 302
+                                                   → CDN 記錄此回應(短 TTL)
+```
+
+**取捨**：
+
+| | 主設計（每次回源 + Redis） | CDN 邊緣 redirect 變體 |
+|---|---|---|
+| 延遲 | 低（回源一趟 + Redis） | **最低**（熱門在邊緣直接跳） |
+| 改 / 刪即時性 | 立即生效 | **TTL 內延遲**（最多一個 TTL 才更新） |
+| 掃描分析 | 每次都記 | **TTL 內漏記**（邊緣命中不回源） |
+| 適用 | 預設（正確性優先） | 超高流量、可容忍 TTL 內誤差的熱門 QR |
+
+**緩解**：TTL 設短（秒級）把誤差控制在可接受範圍；或只對「極熱、目標穩定」的 QR 開啟此模式，一般 QR 仍走主路徑。我們**預設不採用**，把它列為流量極大時的可選最佳化。
