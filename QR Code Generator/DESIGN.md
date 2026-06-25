@@ -163,6 +163,24 @@ CREATE INDEX idx_token_scanned ON scan_events (token, scanned_at);  -- 分析複
 
 小範例（除 62 取餘）：整數 `3842` → `3842÷62 = 商61 餘60 → 'Y'`、`61÷62 = 商0 餘61 → 'Z'` → reversed → `"ZY"`。
 
+**(f) 其他 token 策略與比較（演進路徑）**
+
+展示「從最直覺逐步推到最合適」的思考路徑：
+
+| 策略 | 簡單度 | 唯一性 | 可預測性 | 適用場景 |
+|---|---|---|---|---|
+| Auto-increment | 高 | 高 | **高（危險：可枚舉）** | 內部系統 |
+| 隨機字串 / UUID 截短 | 中 | 中 | 低 | 低流量 |
+| 純 hash(URL) | 中 | **低（同 URL 同 token）** | 低 | ✗ 無法獨立追蹤 |
+| **SHA-256+nonce+Base62（採用）** | 中 | 高 | 低 | 通用方案 |
+| Pre-generated Pool | 低 | 高 | 低 | 高流量（寫入零碰撞） |
+| Snowflake-like | 低 | 高 | 中 | 分散式系統 |
+
+- **演進**：隨機字串（碰撞靠運氣、auto-increment 還可枚舉）→ 純 hash（同 URL 永遠同 token、無法針對不同使用者獨立追蹤）→ **SHA-256+nonce**（解決同 URL 問題；碰撞時換 nonce 確定性重試，不是再碰運氣；DB UNIQUE 兜底）。
+- **Pre-generated Pool**：預先產一批 unique ID 存 DB，寫入時直接分配 → **寫入路徑零碰撞、零重試**，適合超高寫入；代價是要維護 pool。
+- **Snowflake-like**：`timestamp(41) + machine ID(10) + sequence(12) = 64 bits`，各節點本地生成、不需協調，適合分散式；但產出是數字、可預測性中等、且比短碼長。
+- 我們選 SHA-256+nonce 是**通用方案**（唯一性高、不可預測、實作中等）；寫入流量再上去可換 **Pre-generated Pool**（第 5 題的碰撞重試在零碰撞下就免了）。
+
 ## 第 4 題：同 URL 去重
 
 **核心**：dynamic QR 每個必須是獨立實體，不只是省空間問題。
@@ -598,3 +616,22 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 | 適用 | 預設（正確性優先） | 超高流量、可容忍 TTL 內誤差的熱門 QR |
 
 **緩解**：TTL 設短（秒級）把誤差控制在可接受範圍；或只對「極熱、目標穩定」的 QR 開啟此模式，一般 QR 仍走主路徑。我們**預設不採用**，把它列為流量極大時的可選最佳化。
+
+---
+
+## 附錄 C：從 Prototype 到 Production 的落差（production-readiness）
+
+本專案聚焦核心功能與架構決策；要真上 production，以下面向仍待補（對照我們現況）：
+
+| 面向 | 原型現況 | Production 需要 |
+|---|---|---|
+| Error handling | 驗證回 400，但未全面 | 全面輸入驗證、結構化錯誤回應、不因壞輸入 crash |
+| **Rate limiting** | **無** | create 等端點限流，防 script 灌爆 API |
+| **Auth & 多租戶** | **無 user 概念，資料全域** | 登入 + `user_id` 隔離（清單/權限）、見 PDF FR |
+| **Monitoring / Alerting** | **無** | metrics、結構化日誌、服務掛掉告警（動態 QR 的 server 是 SPOF） |
+| Data cleanup | 設計有 cron（第 13 題），未實作 | 定期清過期/長期未點擊，避免 DB bloat |
+| Caching / CDN | 記憶體 dict + 即時生圖 | Redis + object store + CDN（第 7/15 題） |
+
+其中 **rate limiting、auth/多租戶、monitoring** 是目前設計**完全沒談**的三塊，列為 production 前必補。注意：動態 QR 把 server 變成 single point of failure，所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
+
+> **靜態的反向場景**：若需求是「印好不改、離線可用、極高可靠（如醫療器材）」，反而該選**靜態 QR**（編碼原始 URL、不需 server）。我們選動態純粹因為需求是「可修改 + 可追蹤」。

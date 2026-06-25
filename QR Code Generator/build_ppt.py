@@ -405,6 +405,46 @@ bullets(s, Inches(0.6), Inches(3.95), Inches(12.2), Inches(3), [
     "範例：3842 → 餘60='Y'、餘61='Z' → reversed → \"ZY\"",
 ], size=13, gap=7)
 
+# ============ Slide: Token strategy comparison ============
+s = prs.slides.add_slide(BLANK)
+header(s, "08c · TOKEN 策略", "Token 生成策略比較（演進路徑）")
+trows = [
+    ("策略", "簡單度", "唯一性", "可預測", "適用場景"),
+    ("Auto-increment", "高", "高", "高（危險）", "內部系統"),
+    ("隨機字串 / UUID 截短", "中", "中", "低", "低流量"),
+    ("純 hash(URL)", "中", "低", "低", "✗ 同 URL 同 token"),
+    ("SHA-256+nonce+Base62", "中", "高", "低", "通用方案 ← 採用"),
+    ("Pre-generated Pool", "低", "高", "低", "高流量 · 零碰撞"),
+    ("Snowflake-like", "低", "高", "中", "分散式系統"),
+]
+HILITE = RGBColor(0xDB, 0xEA, 0xFE)
+tt = s.shapes.add_table(len(trows), 5, Inches(0.6), Inches(1.75), Inches(12.15), Inches(3.6)).table
+tt.columns[0].width = Inches(3.6)
+for ci in (1, 2, 3):
+    tt.columns[ci].width = Inches(1.75)
+tt.columns[4].width = Inches(3.3)
+for r in range(len(trows)):
+    for c in range(5):
+        cell = tt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        if r == 0:
+            cell.fill.fore_color.rgb = ACCENT
+        elif r == 4:
+            cell.fill.fore_color.rgb = HILITE
+        else:
+            cell.fill.fore_color.rgb = WHITE if r % 2 else LIGHT
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = trows[r][c]
+        bold = (r == 0) or (c == 0) or (r == 4)
+        _font(run, 12, WHITE if r == 0 else INK, bold)
+bullets(s, Inches(0.6), Inches(5.6), Inches(12.3), Inches(1.6), [
+    "演進：隨機（碰撞靠運氣）→ 純 hash（同 URL 同 token、無法獨立追蹤）→ SHA-256+nonce（換 nonce 確定性重試 + DB 兜底）",
+    "進階：Pre-generated Pool（寫入零碰撞，適合超高寫入）· Snowflake-like（分散式本地生成）",
+    "我們選 SHA-256+nonce 為通用方案；寫入流量再上去可換 Pre-generated Pool",
+], size=13, gap=6)
+
 # ============ Slide 9: Redirect-speed decisions ============
 s = prs.slides.add_slide(BLANK)
 header(s, "09 · DEEP DIVE", "決策 2 — 302、快取、非同步")
@@ -585,6 +625,41 @@ for r in range(len(nrows)):
         _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
 textbox(s, Inches(0.6), Inches(6.85), Inches(12.2), Inches(0.5), [
     ("預設不採用；列為超高流量、目標穩定的熱門 QR 之可選最佳化（短 TTL 控制誤差）。", 12, MUTED, False)])
+
+# ============ Slide: Prototype -> Production gap ============
+s = prs.slides.add_slide(BLANK)
+header(s, "附錄 · PROD GAP", "從 Prototype 到 Production 的落差")
+textbox(s, Inches(0.6), Inches(1.5), Inches(12.2), Inches(0.5), [
+    ("動態 QR 把 server 變成 SPOF → caching + CDN + monitoring 不是加分項，是必要代價。", 13, MUTED, False)])
+grows = [
+    ("面向", "原型現況", "Production 需要"),
+    ("Error handling", "驗證回 400，未全面", "全面驗證 · 結構化錯誤 · 不 crash"),
+    ("Rate limiting", "無", "端點限流，防 script 灌爆"),
+    ("Auth & 多租戶", "無 user，資料全域", "登入 + user_id 隔離"),
+    ("Monitoring / Alerting", "無", "metrics · 日誌 · 掛掉告警"),
+    ("Data cleanup", "設計有 cron，未實作", "定期清過期/未點擊，防 DB bloat"),
+    ("Caching / CDN", "記憶體 + 即時生圖", "Redis + object store + CDN"),
+]
+gt = s.shapes.add_table(len(grows), 3, Inches(0.6), Inches(2.15), Inches(12.15), Inches(4.0)).table
+gt.columns[0].width = Inches(3.2); gt.columns[1].width = Inches(4.2); gt.columns[2].width = Inches(4.75)
+RED_BG = RGBColor(0xFE, 0xE2, 0xE2)
+for r in range(len(grows)):
+    for c in range(3):
+        cell = gt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        if r == 0:
+            cell.fill.fore_color.rgb = ACCENT
+        elif c == 1 and grows[r][1] == "無":
+            cell.fill.fore_color.rgb = RED_BG
+        else:
+            cell.fill.fore_color.rgb = WHITE if r % 2 else LIGHT
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = grows[r][c]
+        _font(run, 12, WHITE if r == 0 else INK, r == 0 or c == 0)
+textbox(s, Inches(0.6), Inches(6.35), Inches(12.2), Inches(0.5), [
+    ("rate limiting · auth/多租戶 · monitoring 是目前完全沒談、production 前必補的三塊。", 12, MUTED, False)])
 
 # ============ Slide 13: Status ============
 s = prs.slides.add_slide(BLANK)
