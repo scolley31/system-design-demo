@@ -6,6 +6,18 @@
 
 ---
 
+## 三大關鍵架構決策（決策地圖）
+
+整個系統由三個環環相扣的決策定調——每個決策自然導向下一個：
+
+| 關鍵決策 | 選擇 | 為什麼 / 連鎖反應 |
+|---|---|---|
+| **① 動態 vs 靜態 QR** | **動態**（QR 編 short URL → server redirect） | 需求是「可修改 + 可追蹤」；靜態改不了、無法統計。代價：server 變 SPOF → 逼出 cache/CDN/monitoring。靜態反而適合一次性印刷/離線/醫療等不可改場景。 |
+| **② Token 生成策略** | **SHA-256 + nonce + Base62（8 碼）** | 演進：隨機（碰撞靠運氣）→ 純 hash（同 URL 同 token、無法獨立追蹤）→ **+nonce**（解決同 URL、碰撞換 nonce 確定性重試 + DB 兜底）。流量再上去可換 Pre-generated Pool / Snowflake。 |
+| **③ 301 vs 302 redirect** | **302（暫時）** | 動態 QR → 需要 redirect → 301 被瀏覽器永久快取、跳過我們 server（分析流失、改不了）；302 每次回源 → 可改/刪/分析。代價：latency → 逼出 cache + CDN。 |
+
+→ ①決定要 server、②決定短碼怎麼來、③決定 redirect 怎麼回，三者串成主架構。下表 16 項為其下的實作層決策。
+
 ## 決策總表
 
 | # | 題目 | 決策 | 與 repo 差異 |

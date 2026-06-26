@@ -273,6 +273,42 @@ for tb_, ty in [(b_cache, Inches(1.9)), (b_db, Inches(2.95)), (b_cdn, Inches(3.9
 textbox(s, Inches(0.6), Inches(6.0), Inches(12), Inches(1.0), [
     ("讀多寫少：redirect 先打 Redis，miss 才到 DB（read replica）；QR 圖片走 CDN；scan 非同步進分析庫。", 13, MUTED, False)])
 
+# ============ Slide: Decision map ============
+s = prs.slides.add_slide(BLANK)
+header(s, "決策地圖", "三大關鍵架構決策（環環相扣）")
+cards = [
+    ("① 動態 vs 靜態", APP, "選：動態 QR", [
+        "QR 編 short URL → server redirect",
+        "可修改目標 + 可追蹤掃描",
+        "代價：server = SPOF",
+        "→ 逼出 cache / CDN / monitoring",
+    ]),
+    ("② Token 生成策略", DB, "SHA-256+nonce+Base62", [
+        "隨機（碰撞靠運氣）",
+        "→ 純 hash（同 URL 同 token）",
+        "→ +nonce（確定性重試 + DB 兜底）",
+        "高流量可換 Pre-gen Pool",
+    ]),
+    ("③ 301 vs 302", CACHE, "選：302（暫時）", [
+        "301 永久快取 → 跳過 server",
+        "→ 分析流失、改不了目標",
+        "302 每次回源 → 可改/刪/分析",
+        "代價：latency → cache + CDN",
+    ]),
+]
+cw = Inches(3.9); gp = Inches(0.3); x0 = Inches(0.5); y = Inches(2.1)
+for i, (title, color, choice, items) in enumerate(cards):
+    x = x0 + i * (cw + gp)
+    box(s, x, y, cw, Inches(0.6), title, color, WHITE, 15)
+    box(s, x, y + Inches(0.68), cw, Inches(0.55), choice, GREEN, WHITE, 13)
+    body = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y + Inches(1.32), cw, Inches(2.7))
+    body.fill.solid(); body.fill.fore_color.rgb = LIGHT; body.line.color.rgb = LIGHT; body.shadow.inherit = False
+    bullets(s, x + Inches(0.2), y + Inches(1.48), cw - Inches(0.4), Inches(2.4), items, size=12, gap=8)
+    if i < 2:
+        arrow(s, x + cw, y + Inches(0.3), x + cw + gp, y + Inches(0.3))
+textbox(s, Inches(0.5), Inches(6.35), Inches(12.3), Inches(0.6), [
+    ("①決定要 server、②決定短碼怎麼來、③決定 redirect 怎麼回 —— 三者串成主架構，其下才是 16 項實作決策。", 13, MUTED, False)])
+
 # ============ Slide 6: Create flow ============
 s = prs.slides.add_slide(BLANK)
 header(s, "05 · CREATE FLOW", "建立流程")
