@@ -81,3 +81,56 @@ curl -o /dev/null -w "%{http_code}\n" http://localhost:8000/r/INVALID
 # 分析
 curl http://localhost:8000/api/v1/qr/{token}/analytics
 ```
+
+## AWS 部署（production）
+
+已用 **Terraform** 部署到 AWS（`ap-northeast-1`）。程式改動全 **env-gated**：本機不設環境變數 → 維持 SQLite + 記憶體 cache + 即時生圖，**雲端與本機互不影響**。Runbook 與 IaC 在 [`../infra/`](../infra/)。
+
+### 架構
+
+```
+           ┌──────── CloudFront (CDN) ────────┐
+  Client ──┤  /qr-img/*       → S3 (QR PNG)    │ 長快取
+           │  /, /r/*, /api/* → API Gateway    │ redirect 不快取
+           └─────────────┬────────────────────┘
+                         │ VPC Link
+                         ▼
+                內部 ALB (/health)
+                         ▼
+            EC2 Auto Scaling Group (Docker/gunicorn)
+                 ├── RDS PostgreSQL
+                 └── ElastiCache Redis
+
+  SSM Parameter Store(設定) · Secrets Manager(DB 密碼) · ECR(映像) · NAT Gateway
+```
+
+env（雲端由 EC2 容器注入，本機留空即走原型路徑）：`DATABASE_URL`、`REDIS_URL`、`S3_BUCKET`、`CDN_BASE`、`BASE_URL`。
+- `app/cache.py`：有 `REDIS_URL` → Redis，否則記憶體。
+- `app/storage.py`：有 `S3_BUCKET` → 上傳 S3 並回 CDN URL，否則 `/image` 即時生圖。
+- `app/database.py`：`DATABASE_URL` 預設 SQLite，可換 PostgreSQL。
+
+### CI/CD（GitHub Actions，`.github/workflows/deploy.yml`）
+
+```
+git push (QR Code Generator/**)
+   └─ GitHub Actions ── OIDC assume role（無長期金鑰）
+        ├─ docker buildx --platform linux/arm64   # EC2 是 t4g/arm64
+        ├─ push → ECR (tag = git SHA + latest)
+        ├─ SSM put-parameter /qrcode/IMAGE_URI
+        └─ SSM send-command (tag:app=qrcode) → EC2 deploy-app.sh
+                                                 └─ ECR login → docker pull → docker run
+   └─ ALB /health 通過 → 新版上線
+```
+
+前置：repo variable `AWS_DEPLOY_ROLE_ARN`（= `terraform output gha_deploy_role_arn`）。
+
+### 部署 / 銷毀
+
+```bash
+cd ../infra && export PATH="$HOME/bin:$PATH"
+terraform init && terraform apply        # 約 58 個資源（會計費）
+terraform output cloudfront_url          # 對外網址
+terraform destroy                        # 不用時收掉、停止計費
+```
+
+完整步驟（首次推映像、驗證、成本）見 [`../infra/README.md`](../infra/README.md)。

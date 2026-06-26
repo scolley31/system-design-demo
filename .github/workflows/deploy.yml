@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - "QR Code Generator/**"
+      - "!QR Code Generator/*.md"
+      - "!QR Code Generator/*.pptx"
+      - "!QR Code Generator/build_ppt.py"
+      - "!QR Code Generator/schema.sql"
       - ".github/workflows/deploy.yml"
   workflow_dispatch: {}
 

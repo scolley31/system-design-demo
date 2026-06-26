@@ -697,6 +697,53 @@ for r in range(len(grows)):
 textbox(s, Inches(0.6), Inches(6.35), Inches(12.2), Inches(0.5), [
     ("rate limiting · auth/多租戶 · monitoring 是目前完全沒談、production 前必補的三塊。", 12, MUTED, False)])
 
+# ============ Slide: AWS Deployment Architecture ============
+s = prs.slides.add_slide(BLANK)
+header(s, "部署 · AWS", "AWS 部署架構（Terraform，已上線）")
+box(s, Inches(0.5), Inches(2.7), Inches(1.7), Inches(0.85), "Client", CLIENT, WHITE, 13)
+box(s, Inches(2.45), Inches(2.7), Inches(2.0), Inches(0.85), "CloudFront\n(CDN)", CDN, WHITE, 12)
+box(s, Inches(2.45), Inches(1.55), Inches(2.0), Inches(0.7), "S3 (QR PNG)\n/qr-img/*", ANALYTICS, WHITE, 11)
+box(s, Inches(4.7), Inches(2.7), Inches(2.0), Inches(0.85), "API Gateway\n(HTTP API)", GATEWAY, WHITE, 12)
+box(s, Inches(6.95), Inches(2.7), Inches(1.6), Inches(0.85), "內部 ALB\n/health", APP, WHITE, 12)
+box(s, Inches(8.8), Inches(2.7), Inches(2.1), Inches(0.95), "EC2 ASG\nDocker/gunicorn", INK, WHITE, 12)
+box(s, Inches(8.8), Inches(3.95), Inches(2.1), Inches(0.7), "RDS PostgreSQL", DB, WHITE, 11)
+box(s, Inches(8.8), Inches(4.8), Inches(2.1), Inches(0.7), "ElastiCache Redis", CACHE, WHITE, 11)
+arrow(s, Inches(2.2), Inches(3.12), Inches(2.45), Inches(3.12))
+arrow(s, Inches(3.45), Inches(2.7), Inches(3.45), Inches(2.25), color=MUTED, width=1.2)  # CF→S3
+arrow(s, Inches(4.45), Inches(3.12), Inches(4.7), Inches(3.12))
+arrow(s, Inches(6.7), Inches(3.12), Inches(6.95), Inches(3.12))
+arrow(s, Inches(8.55), Inches(3.12), Inches(8.8), Inches(3.12))
+arrow(s, Inches(9.85), Inches(3.65), Inches(9.85), Inches(3.95), color=MUTED, width=1.2)
+arrow(s, Inches(9.85), Inches(4.65), Inches(9.85), Inches(4.8), color=MUTED, width=1.2)
+textbox(s, Inches(4.7), Inches(3.62), Inches(2.2), Inches(0.3), [("VPC Link", 10, MUTED, False)])
+textbox(s, Inches(0.5), Inches(5.7), Inches(12.3), Inches(1.4), [
+    ("/qr-img/* → S3 長快取;/, /r/*, /api/* → API Gateway,redirect 不快取(第 6 題每次回源)。", 13, INK, False, 4),
+    ("設定/密鑰:SSM Parameter Store(DATABASE_URL/REDIS_URL/S3_BUCKET/CDN_BASE/BASE_URL/IMAGE_URI)·Secrets Manager(DB 密碼)·ECR·NAT Gateway。", 12, MUTED, False)])
+
+# ============ Slide: CI/CD Flow ============
+s = prs.slides.add_slide(BLANK)
+header(s, "部署 · CI/CD", "CI/CD 流程（GitHub Actions + OIDC）")
+steps = [
+    ("git push", "QR Code Generator/**", CLIENT),
+    ("GitHub Actions", "OIDC assume role\n(無長期金鑰)", GATEWAY),
+    ("buildx", "--platform\nlinux/arm64", APP),
+    ("ECR push", "tag = SHA\n+ latest", DB),
+    ("SSM 更新", "/qrcode/\nIMAGE_URI", CDN),
+    ("SSM 部署", "→ EC2\ndeploy-app.sh", ANALYTICS),
+    ("上線", "ALB /health\n通過", GREEN),
+]
+n = len(steps); bw = Inches(1.62); gp = Inches(0.13); x0 = Inches(0.5); y = Inches(2.5)
+for i, (t, d, color) in enumerate(steps):
+    x = x0 + i * (bw + gp)
+    box(s, x, y, bw, Inches(1.4), t + "\n" + d, color, WHITE, 11)
+    if i < n - 1:
+        arrow(s, x + bw, y + Inches(0.7), x + bw + gp, y + Inches(0.7))
+bullets(s, Inches(0.6), Inches(4.4), Inches(12.3), Inches(2.4), [
+    "EC2 deploy-app.sh:從 SSM 撈設定 → ECR login → docker pull → docker run(換新容器)",
+    "全 env-gated:本機無這些環境變數 → 維持 SQLite + 記憶體 cache + 即時生圖,不受影響",
+    "部署踩到的兩個坑:① EC2 role 少 s3:PutObject(500)② CI build amd64 但 EC2 arm64(502)→ buildx 跨平台修正",
+], size=14, gap=9)
+
 # ============ Slide 13: Status ============
 s = prs.slides.add_slide(BLANK)
 bg = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, SW, SH)

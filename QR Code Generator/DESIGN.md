@@ -647,3 +647,54 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 其中 **rate limiting、auth/多租戶、monitoring** 是目前設計**完全沒談**的三塊，列為 production 前必補。注意：動態 QR 把 server 變成 single point of failure，所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
 
 > **靜態的反向場景**：若需求是「印好不改、離線可用、極高可靠（如醫療器材）」，反而該選**靜態 QR**（編碼原始 URL、不需 server）。我們選動態純粹因為需求是「可修改 + 可追蹤」。
+
+---
+
+## 附錄 D：AWS 部署架構與 CI/CD（已實際部署）
+
+本設計已用 **Terraform** 部署到 AWS（region `ap-northeast-1`），程式改動全 env-gated、與本機啟動分離。完整 runbook 見 `infra/README.md`。
+
+### 部署架構
+
+```
+                 ┌──────────── CloudFront (CDN, *.cloudfront.net) ────────────┐
+   Client ───────┤  /qr-img/*       ──────────────► S3 (QR PNG, private+OAC)   │ 長快取
+                 │  /, /r/*, /api/* ──► API Gateway (HTTP API)                  │ redirect 不快取
+                 └───────────────────────────────┬────────────────────────────┘
+                                                  │ VPC Link
+                                                  ▼
+                                    內部 ALB (private subnets, health /health)
+                                                  ▼
+                            EC2 Auto Scaling Group (Docker/gunicorn, private)
+                                  ├── RDS PostgreSQL (private)
+                                  └── ElastiCache Redis (private)
+
+  設定/密鑰：SSM Parameter Store（DATABASE_URL / REDIS_URL / S3_BUCKET / CDN_BASE / BASE_URL / IMAGE_URI）
+            Secrets Manager（DB 密碼）· ECR（容器映像）· NAT Gateway（private egress）
+```
+
+對應設計決策：API Gateway 前門、CloudFront 服務靜態 QR 圖且 **redirect 路徑關快取**（第 6 題每次回源）、Redis 共享 cache（第 7 題）、RDS 讀寫分離可擴（第 16 題）、S3+CloudFront 圖片（第 15 題）。EC2 開機/部署時從 SSM 撈設定注入容器（env-gated，本機無這些 env 則走 SQLite+記憶體+即時生圖）。
+
+### CI/CD 流程（GitHub Actions）
+
+```
+ git push（路徑含 QR Code Generator/**）
+        │
+        ▼
+ GitHub Actions ── OIDC assume role（無長期金鑰，role 由 cicd module 建立）──► AWS
+        │
+        ├─ docker buildx --platform linux/arm64   （EC2 是 t4g/arm64，須跨平台 build）
+        ├─ push → ECR（tag = git SHA + latest）
+        ├─ SSM put-parameter /qrcode/IMAGE_URI = <新映像>
+        └─ SSM send-command（targets tag:app=qrcode）→ 每台 EC2 執行 deploy-app.sh
+                                                        └─ ECR login → docker pull → docker run（換新容器）
+        ▼
+ ALB health check /health 通過 → 新版上線
+```
+
+### 部署時踩到並修正的兩個重點
+
+1. **EC2 instance role 少 `s3:PutObject`** → create 上傳圖失敗回 500。修法：edge module 補上對 QR bucket 的 PutObject。
+2. **CI 在 amd64 runner build、但 EC2 是 arm64(t4g)** → 容器 exec format error、ALB 502。修法：workflow 改用 **buildx + QEMU build `linux/arm64`**。
+
+> 教訓呼應附錄 C：動態 QR 的 server 是 SPOF，cache/CDN/monitoring 是必要代價；且**跨架構容器**與**最小權限 IAM** 是 prototype→production 常見的坑。
