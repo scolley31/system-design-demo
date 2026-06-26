@@ -1,0 +1,38 @@
+# 本地驗證 production code path（Postgres + Redis）。
+# 與本機 uvicorn 啟動互不影響；需手動 `docker compose up` 才生效。
+# 注意：S3 在本地不啟用（不設 S3_BUCKET），圖片走 /image 即時生圖。
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: qr
+      POSTGRES_PASSWORD: qr
+      POSTGRES_DB: qr
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qr"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://qr:qr@db:5432/qr
+      REDIS_URL: redis://redis:6379/0
+      BASE_URL: http://localhost:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

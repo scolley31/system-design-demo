@@ -2,3 +2,8 @@ fastapi==0.115.6
 uvicorn==0.34.0
 sqlalchemy==2.0.36
 qrcode[pil]==8.0
+# 正式版後端（env-gated；本機不設對應環境變數則不會用到）
+gunicorn==23.0.0
+psycopg2-binary==2.9.10
+redis==5.2.1
+boto3==1.35.90

@@ -1,0 +1,9 @@
+# Terraform state 含敏感值（DB 密碼等），絕不可進版控
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
+# .terraform.lock.hcl 保留進版控（鎖定 provider 版本）

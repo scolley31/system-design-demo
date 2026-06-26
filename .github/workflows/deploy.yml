@@ -1,0 +1,74 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "QR Code Generator/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+  PROJECT: qrcode
+  ECR_REPOSITORY: qrcode
+  SSM_IMAGE_PARAM: /qrcode/IMAGE_URI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE_URI="$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA::12}"
+          docker build -t "$IMAGE_URI" -t "$REGISTRY/$ECR_REPOSITORY:latest" "QR Code Generator"
+          docker push "$IMAGE_URI"
+          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Update IMAGE_URI in SSM
+        run: |
+          aws ssm put-parameter --name "$SSM_IMAGE_PARAM" --type String \
+            --value "$IMAGE_URI" --overwrite
+
+      - name: Deploy to EC2 via SSM run-command
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy $IMAGE_URI" \
+            --targets "Key=tag:app,Values=$PROJECT" \
+            --parameters 'commands=["/usr/local/bin/deploy-app.sh"]' \
+            --query "Command.CommandId" --output text)
+          echo "Command: $CMD_ID"
+          # 等待所有目標完成
+          for i in $(seq 1 40); do
+            sleep 6
+            STATUS=$(aws ssm list-command-invocations --command-id "$CMD_ID" \
+              --query "CommandInvocations[].Status" --output text || echo "")
+            echo "status: $STATUS"
+            case "$STATUS" in
+              *Failed*|*Cancelled*|*TimedOut*) echo "deploy failed"; exit 1;;
+            esac
+            if [ -n "$STATUS" ] && ! echo "$STATUS" | grep -qvE "Success"; then
+              echo "all targets succeeded"; exit 0
+            fi
+          done
+          echo "timed out waiting for deploy"; exit 1

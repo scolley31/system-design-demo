@@ -1,0 +1,48 @@
+#!/bin/bash
+set -euxo pipefail
+
+dnf update -y
+dnf install -y docker
+systemctl enable --now docker
+
+# 部署腳本：從 SSM 撈設定 → ECR 登入 → pull → 重啟容器。
+# 開機時執行一次；CI/CD 也用 SSM run-command 呼叫同一支腳本做重新部署。
+cat > /usr/local/bin/deploy-app.sh <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+REGION="${region}"
+PREFIX="${ssm_prefix}"
+
+get() {
+  aws ssm get-parameter --region "$REGION" --name "$1" --with-decryption \
+    --query Parameter.Value --output text 2>/dev/null || echo ""
+}
+
+IMAGE_URI="$(get "$PREFIX/IMAGE_URI")"
+if [ -z "$IMAGE_URI" ] || [ "$IMAGE_URI" = "None" ]; then
+  echo "IMAGE_URI not set yet; nothing to deploy."
+  exit 0
+fi
+
+DATABASE_URL="$(get "$PREFIX/DATABASE_URL")"
+REDIS_URL="$(get "$PREFIX/REDIS_URL")"
+S3_BUCKET="$(get "$PREFIX/S3_BUCKET")"
+CDN_BASE="$(get "$PREFIX/CDN_BASE")"
+BASE_URL="$(get "$PREFIX/BASE_URL")"
+
+REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+docker pull "$IMAGE_URI"
+
+docker rm -f qrapp 2>/dev/null || true
+docker run -d --name qrapp --restart always -p 8000:8000 \
+  -e DATABASE_URL="$DATABASE_URL" \
+  -e REDIS_URL="$REDIS_URL" \
+  -e S3_BUCKET="$S3_BUCKET" \
+  -e CDN_BASE="$CDN_BASE" \
+  -e BASE_URL="$BASE_URL" \
+  "$IMAGE_URI"
+SCRIPT
+
+chmod +x /usr/local/bin/deploy-app.sh
+/usr/local/bin/deploy-app.sh || true

@@ -1,0 +1,13 @@
+# 複製成 terraform.tfvars 後依需求調整。
+project = "qrcode"
+region  = "ap-northeast-1"
+azs     = ["ap-northeast-1a", "ap-northeast-1c"]
+
+# 成本控制（demo 預設）
+single_nat_gateway = true
+db_multi_az        = false
+db_instance_class  = "db.t4g.micro"
+redis_node_type    = "cache.t4g.micro"
+ec2_instance_type  = "t4g.small"
+
+github_repo = "scolley31/system-design-demo"

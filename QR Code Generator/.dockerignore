@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+.idea/
+.DS_Store
+.git/
+build_ppt.py
+*.pptx
+DESIGN.md
+README.md

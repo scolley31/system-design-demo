@@ -3,14 +3,13 @@ import io
 import os
 from datetime import datetime, timezone
 
-import qrcode
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
-from PIL import Image
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from . import storage
 from .cache import cache
 from .database import SessionLocal, get_db
 from .models import ScanEvent, UrlMapping
@@ -87,10 +86,18 @@ def create_qr(req: CreateRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to generate unique token")
 
     cache.set(token, normalized, expires_at)  # 暖快取（也緩解 read replica 複寫延遲，第 16 題）
+
+    short_url = f"{BASE_URL}/r/{token}"
+    # 第 15 題：有設 S3 則預生成上傳，qr_code_url 指 CDN；否則回 /image 即時生圖端點。
+    if storage.enabled():
+        qr_code_url = storage.upload_qr(token, storage.render_qr_png(short_url))
+    else:
+        qr_code_url = f"{BASE_URL}/api/v1/qr/{token}/image"
+
     return CreateResponse(
         token=token,
-        short_url=f"{BASE_URL}/r/{token}",
-        qr_code_url=f"{BASE_URL}/api/v1/qr/{token}/image",
+        short_url=short_url,
+        qr_code_url=qr_code_url,
         original_url=normalized,
     )
 
@@ -173,21 +180,8 @@ def get_qr_image(
     """
     _get_active_or_404(token, db)
     short_url = f"{BASE_URL}/r/{token}"
-
-    qr = qrcode.QRCode(box_size=10, border=border)
-    qr.add_data(short_url)
-    qr.make(fit=True)
-    pil_img = qr.make_image(fill_color=f"#{color}", back_color="white")
-
-    buf = io.BytesIO()
-    pil_img.save(buf, format="PNG")
-    if dimension:
-        buf.seek(0)
-        resized = Image.open(buf).resize((dimension, dimension), Image.NEAREST)
-        buf = io.BytesIO()
-        resized.save(buf, format="PNG")
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/png")
+    png = storage.render_qr_png(short_url, color=color, border=border, dimension=dimension)
+    return StreamingResponse(io.BytesIO(png), media_type="image/png")
 
 
 @router.get("/api/v1/qr/{token}/analytics")

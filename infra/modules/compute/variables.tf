@@ -1,0 +1,12 @@
+variable "project" { type = string }
+variable "region" { type = string }
+variable "vpc_id" { type = string }
+variable "private_subnet_ids" { type = list(string) }
+variable "ec2_sg_id" { type = string }
+variable "alb_sg_id" { type = string }
+variable "instance_type" { type = string }
+variable "asg_min_size" { type = number }
+variable "asg_max_size" { type = number }
+variable "asg_desired_capacity" { type = number }
+variable "ssm_prefix" { type = string }
+variable "db_secret_arn" { type = string }
