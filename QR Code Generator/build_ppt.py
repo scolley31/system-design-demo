@@ -671,7 +671,7 @@ grows = [
     ("面向", "原型現況", "Production 需要"),
     ("Error handling", "驗證回 400，未全面", "全面驗證 · 結構化錯誤 · 不 crash"),
     ("Rate limiting", "✅ 已實作", "WAF per-IP + API GW 節流"),
-    ("Auth & 多租戶", "無 user，資料全域", "登入 + user_id 隔離"),
+    ("Auth & 多租戶", "✅ 已實作", "Cognito + JWT + owner_id 隔離"),
     ("Monitoring / Alerting", "無", "metrics · 日誌 · 掛掉告警"),
     ("Data cleanup", "設計有 cron，未實作", "定期清過期/未點擊，防 DB bloat"),
     ("Caching / CDN", "記憶體 + 即時生圖", "Redis + object store + CDN"),
@@ -703,7 +703,9 @@ header(s, "部署 · AWS", "AWS 部署架構（Terraform，已上線）")
 box(s, Inches(0.5), Inches(2.7), Inches(1.7), Inches(0.85), "Client", CLIENT, WHITE, 13)
 box(s, Inches(2.45), Inches(2.7), Inches(2.0), Inches(0.85), "CloudFront\n(CDN + WAF)", CDN, WHITE, 12)
 box(s, Inches(2.45), Inches(1.55), Inches(2.0), Inches(0.7), "S3 (QR PNG)\n/qr-img/*", ANALYTICS, WHITE, 11)
-box(s, Inches(4.7), Inches(2.7), Inches(2.0), Inches(0.85), "API Gateway\n(HTTP API · 節流)", GATEWAY, WHITE, 12)
+box(s, Inches(4.7), Inches(2.7), Inches(2.0), Inches(0.85), "API Gateway\n(JWT auth · 節流)", GATEWAY, WHITE, 12)
+box(s, Inches(4.7), Inches(1.55), Inches(2.0), Inches(0.7), "Cognito\n(user pool)", DB, WHITE, 11)
+arrow(s, Inches(5.7), Inches(2.7), Inches(5.7), Inches(2.25), color=MUTED, width=1.2)  # APIGW→Cognito(JWT)
 box(s, Inches(6.95), Inches(2.7), Inches(1.6), Inches(0.85), "內部 ALB\n/health", APP, WHITE, 12)
 box(s, Inches(8.8), Inches(2.7), Inches(2.1), Inches(0.95), "EC2 ASG\nDocker/gunicorn", INK, WHITE, 12)
 box(s, Inches(8.8), Inches(3.95), Inches(2.1), Inches(0.7), "RDS PostgreSQL", DB, WHITE, 11)
@@ -754,6 +756,39 @@ bullets(s, Inches(0.6), Inches(5.55), Inches(12.3), Inches(1.6), [
     "為何不能只靠 API GW:HTTP API 內建節流是『整體』非 per-IP、也無 API key → 擋單一 IP 濫用必須靠 WAF",
     "限速值皆 Terraform 變數可調;WAF 阻擋數進 CloudWatch（BlockedRequests）",
     "純 infra 變更,不動 app;已 validate/plan 通過(未 apply)",
+], size=13, gap=7)
+
+# ============ Slide: Auth & Isolation ============
+s = prs.slides.add_slide(BLANK)
+header(s, "安全 · AUTH & 多租戶", "Cognito + API GW JWT authorizer + owner_id 隔離")
+box(s, Inches(0.5), Inches(2.0), Inches(2.2), Inches(0.9), "前端\n(管理頁)", CLIENT, WHITE, 12)
+box(s, Inches(3.0), Inches(2.0), Inches(2.6), Inches(0.9), "Cognito Hosted UI\n登入(PKCE)→ id token", DB, WHITE, 11)
+box(s, Inches(5.95), Inches(2.0), Inches(2.8), Inches(0.9), "API GW JWT authorizer\n未帶/無效 → 401", GATEWAY, WHITE, 11)
+box(s, Inches(9.1), Inches(2.0), Inches(3.4), Inches(0.9), "EC2:取 sub=owner_id\n依 owner 過濾/授權", APP, WHITE, 11)
+arrow(s, Inches(2.7), Inches(2.45), Inches(3.0), Inches(2.45))
+arrow(s, Inches(5.6), Inches(2.45), Inches(5.95), Inches(2.45))
+arrow(s, Inches(8.75), Inches(2.45), Inches(9.1), Inches(2.45))
+nrows = [
+    ("", "需登入 (JWT)", "公開 (無 auth)"),
+    ("端點", "create / list / get / patch / delete / analytics", "/r/{token} 掃描 · QR 圖 · /health"),
+    ("隔離", "owner_id = Cognito sub;非擁有者一律 404", "redirect/圖不分 owner"),
+]
+nt = s.shapes.add_table(len(nrows), 3, Inches(0.6), Inches(3.4), Inches(12.15), Inches(1.7)).table
+nt.columns[0].width = Inches(1.6); nt.columns[1].width = Inches(6.35); nt.columns[2].width = Inches(4.2)
+for r in range(len(nrows)):
+    for c in range(3):
+        cell = nt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = nrows[r][c]
+        _font(run, 12, WHITE if r == 0 else INK, r == 0 or c == 0)
+bullets(s, Inches(0.6), Inches(5.4), Inches(12.3), Inches(1.6), [
+    "前端用 id token(帶 aud+email);API GW authorizer 在邊緣擋未授權,app 再取 sub 當 owner_id",
+    "env-gated:本機不設 AUTH_ENABLED → dev user『local-dev』、免登入,SQLite 照跑",
+    "純 env 開關 + 新 infra(Cognito/authorizer),已 validate/plan 通過(未 apply)",
 ], size=13, gap=7)
 
 # ============ Slide: CI/CD Flow ============

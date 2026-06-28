@@ -17,3 +17,11 @@ output "qr_bucket" {
 output "waf_web_acl_arn" {
   value = aws_wafv2_web_acl.cf.arn
 }
+
+output "api_id" {
+  value = aws_apigatewayv2_api.this.id
+}
+
+output "integration_id" {
+  value = aws_apigatewayv2_integration.alb.id
+}

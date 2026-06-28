@@ -107,6 +107,8 @@ curl http://localhost:8000/api/v1/qr/{token}/analytics
 
 **Rate limiting(防 script 灌爆)**:CloudFront 掛 **WAF rate-based rule(per-IP)**——`/api/*` 300/5分、全域 2000/5分,超量回 403;API Gateway 另有整體節流(429)當後端 backstop。限速值為 Terraform 變數可調。詳見 DESIGN 附錄 E。
 
+**Auth & 多租戶**:**AWS Cognito + API Gateway JWT authorizer**——管理端點需登入(Bearer id token,未帶 → 401),資料以 `owner_id`(Cognito sub)隔離,每人只見自己的 QR;掃描 redirect / QR 圖維持公開。env-gated:本機不設 `AUTH_ENABLED` → 免登入(dev user)。詳見 DESIGN 附錄 F。
+
 env（雲端由 EC2 容器注入，本機留空即走原型路徑）：`DATABASE_URL`、`REDIS_URL`、`S3_BUCKET`、`CDN_BASE`、`BASE_URL`。
 - `app/cache.py`：有 `REDIS_URL` → Redis，否則記憶體。
 - `app/storage.py`：有 `S3_BUCKET` → 上傳 S3 並回 CDN URL，否則 `/image` 即時生圖。

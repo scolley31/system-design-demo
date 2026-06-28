@@ -12,6 +12,9 @@
   .wrap { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .authbox { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:10px; white-space:nowrap; }
+  .authbox b { color:var(--fg); }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
   label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
@@ -39,45 +42,146 @@
   .daily span { display:inline-block; margin-right:12px; }
   .head { display:flex; justify-content:space-between; align-items:center; margin:28px 0 4px; }
   .head h2 { font-size:15px; margin:0; }
+  .login { text-align:center; padding:60px 20px; }
+  .login p { color:var(--muted); margin-bottom:20px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>QR Code Generator</h1>
-  <div class="sub">輸入 URL 產生動態 QR；掃描短碼經 302 導向目標，可改 / 刪 / 看掃描分析。</div>
-
-  <div class="card">
-    <div class="row">
-      <div class="grow">
-        <label>目標 URL</label>
-        <input id="url" type="text" placeholder="https://example.com/page" />
-      </div>
-      <div>
-        <label>過期時間（選填）</label>
-        <input id="expires" type="datetime-local" />
-      </div>
-      <button id="create">產生 QR</button>
+  <div class="topbar">
+    <div>
+      <h1>QR Code Generator</h1>
+      <div class="sub">輸入 URL 產生動態 QR；掃描短碼經 302 導向目標，可改 / 刪 / 看掃描分析。</div>
     </div>
-    <div id="msg" class="msg"></div>
+    <div class="authbox" id="authbox"></div>
   </div>
 
-  <div class="head">
-    <h2>我的 QR Code</h2>
-    <button class="ghost" id="refresh">重新整理</button>
+  <!-- 需登入時顯示 -->
+  <div class="login" id="login" style="display:none">
+    <p>請先登入以管理你的 QR Code。</p>
+    <button id="loginBtn">登入</button>
   </div>
-  <div id="list" class="list"></div>
+
+  <!-- 已登入 / 本機免登入時顯示 -->
+  <div id="app" style="display:none">
+    <div class="card">
+      <div class="row">
+        <div class="grow">
+          <label>目標 URL</label>
+          <input id="url" type="text" placeholder="https://example.com/page" />
+        </div>
+        <div>
+          <label>過期時間（選填）</label>
+          <input id="expires" type="datetime-local" />
+        </div>
+        <button id="create">產生 QR</button>
+      </div>
+      <div id="msg" class="msg"></div>
+    </div>
+
+    <div class="head">
+      <h2>我的 QR Code</h2>
+      <button class="ghost" id="refresh">重新整理</button>
+    </div>
+    <div id="list" class="list"></div>
+  </div>
 </div>
 
 <script>
 const $ = (s) => document.querySelector(s);
-const api = (p, opt) => fetch(p, opt).then(async r => {
-  const body = r.headers.get("content-type")?.includes("json") ? await r.json() : null;
-  if (!r.ok) throw new Error(body?.detail || `HTTP ${r.status}`);
-  return body;
-});
 
-function setMsg(text, kind="") { const m = $("#msg"); m.textContent = text; m.className = "msg " + kind; }
+// ---------- Auth 狀態 ----------
+const AUTH = { cfg: null, token: null };
 
+const api = (p, opt = {}) => {
+  const headers = Object.assign({}, opt.headers || {});
+  if (AUTH.token) headers["Authorization"] = "Bearer " + AUTH.token;
+  return fetch(p, { ...opt, headers }).then(async r => {
+    if (r.status === 401) { // token 失效 → 重新登入
+      sessionStorage.removeItem("id_token"); AUTH.token = null; showLogin();
+      throw new Error("需要重新登入");
+    }
+    const body = r.headers.get("content-type")?.includes("json") ? await r.json() : null;
+    if (!r.ok) throw new Error(body?.detail || `HTTP ${r.status}`);
+    return body;
+  });
+};
+
+// ---------- PKCE 工具 ----------
+function b64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function randomVerifier() { const a = new Uint8Array(32); crypto.getRandomValues(a); return b64url(a); }
+async function s256(v) { return b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))); }
+function emailFromJwt(t) {
+  try { return JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).email || "已登入"; }
+  catch { return "已登入"; }
+}
+
+async function login() {
+  const v = randomVerifier();
+  sessionStorage.setItem("pkce_verifier", v);
+  const c = AUTH.cfg;
+  const u = new URL(`https://${c.domain}/oauth2/authorize`);
+  u.search = new URLSearchParams({
+    client_id: c.client_id, response_type: "code", scope: "openid email profile",
+    redirect_uri: c.redirect_uri, code_challenge: await s256(v), code_challenge_method: "S256",
+  }).toString();
+  location.href = u.toString();
+}
+
+function logout() {
+  sessionStorage.removeItem("id_token"); AUTH.token = null;
+  const c = AUTH.cfg;
+  const u = new URL(`https://${c.domain}/logout`);
+  u.search = new URLSearchParams({ client_id: c.client_id, logout_uri: c.redirect_uri }).toString();
+  location.href = u.toString();
+}
+
+async function exchangeCodeIfPresent() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code");
+  if (!code) return;
+  const c = AUTH.cfg;
+  const verifier = sessionStorage.getItem("pkce_verifier") || "";
+  const r = await fetch(`https://${c.domain}/oauth2/token`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code", client_id: c.client_id, code,
+      redirect_uri: c.redirect_uri, code_verifier: verifier,
+    }),
+  });
+  const tok = await r.json();
+  if (tok.id_token) { sessionStorage.setItem("id_token", tok.id_token); AUTH.token = tok.id_token; }
+  history.replaceState({}, "", location.pathname); // 清掉 ?code=...
+}
+
+function showLogin() {
+  $("#app").style.display = "none";
+  $("#login").style.display = "block";
+  $("#authbox").innerHTML = "";
+}
+function showApp(email) {
+  $("#login").style.display = "none";
+  $("#app").style.display = "block";
+  if (email) $("#authbox").innerHTML = `<span><b>${email}</b></span> <button class="ghost" id="logoutBtn">登出</button>`;
+  else $("#authbox").innerHTML = `<span>本機模式（免登入）</span>`;
+  const lo = $("#logoutBtn"); if (lo) lo.onclick = logout;
+  loadList();
+}
+
+async function bootstrap() {
+  AUTH.cfg = await api("/api/v1/auth/config");
+  if (!AUTH.cfg.auth_enabled) { showApp(null); return; }  // 本機/原型：免登入
+  await exchangeCodeIfPresent();
+  AUTH.token = AUTH.token || sessionStorage.getItem("id_token");
+  if (!AUTH.token) { showLogin(); return; }
+  showApp(emailFromJwt(AUTH.token));
+}
+
+// ---------- QR 管理 ----------
+function setMsg(text, kind = "") { const m = $("#msg"); m.textContent = text; m.className = "msg " + kind; }
 function fmt(dt) { return dt ? new Date(dt).toLocaleString() : "—"; }
 
 async function createQR() {
@@ -90,7 +194,7 @@ async function createQR() {
   setMsg("產生中…");
   try {
     const d = await api("/api/v1/qr/create", {
-      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload)
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
     });
     setMsg(`已建立：${d.short_url}（正規化後：${d.original_url}）`, "ok");
     $("#url").value = ""; $("#expires").value = "";
@@ -143,7 +247,7 @@ async function editQR(token) {
   if (url === null) return;
   try {
     await api("/api/v1/qr/" + token, {
-      method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ url: url.trim() })
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url.trim() })
     });
     setMsg("已更新目標 URL", "ok");
     await loadList();
@@ -173,8 +277,9 @@ async function toggleAnalytics(token, box) {
 
 $("#create").onclick = createQR;
 $("#refresh").onclick = loadList;
+$("#loginBtn").onclick = login;
 $("#url").addEventListener("keydown", e => { if (e.key === "Enter") createQR(); });
-loadList();
+bootstrap();
 </script>
 </body>
 </html>

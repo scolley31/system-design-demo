@@ -11,6 +11,9 @@ class UrlMapping(Base):
     __tablename__ = "url_mappings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Auth & Isolation：擁有者（Cognito sub；本機 env-gated 時為 "local-dev"）。
+    # 加 index 加速「列我的 QR」的 WHERE owner_id=? 查詢。
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     # 第 3 題：8 碼 Base62 token；第 5 題：UNIQUE 為碰撞安全網（直接插入 + 例外重試）。
     # 第 2 題的 redirect 靠 token 查找，加 index 避免全表掃描。
     token: Mapped[str] = mapped_column(String(8), unique=True, nullable=False, index=True)

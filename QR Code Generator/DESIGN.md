@@ -639,12 +639,12 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 |---|---|---|
 | Error handling | 驗證回 400，但未全面 | 全面輸入驗證、結構化錯誤回應、不因壞輸入 crash |
 | Rate limiting | ✅ **已實作**（WAF per-IP + API GW 整體節流） | 見附錄 E |
-| **Auth & 多租戶** | **無 user 概念，資料全域** | 登入 + `user_id` 隔離（清單/權限）、見 PDF FR |
+| Auth & 多租戶 | ✅ **已實作**（Cognito + API GW JWT authorizer + owner_id 隔離） | 見附錄 F |
 | **Monitoring / Alerting** | **無** | metrics、結構化日誌、服務掛掉告警（動態 QR 的 server 是 SPOF） |
 | Data cleanup | 設計有 cron（第 13 題），未實作 | 定期清過期/長期未點擊，避免 DB bloat |
 | Caching / CDN | 記憶體 dict + 即時生圖 | Redis + object store + CDN（第 7/15 題） |
 
-**Rate limiting 已實作**(WAF per-IP + API GW 整體節流,見附錄 E);剩下 **auth/多租戶、monitoring** 是還沒做的兩塊,列為 production 前必補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
+**Rate limiting**(附錄 E)與 **Auth/多租戶**(附錄 F)已實作;剩下 **monitoring/alerting**、**全面 error handling**、**data cleanup cron** 待補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
 
 > **靜態的反向場景**：若需求是「印好不改、離線可用、極高可靠（如醫療器材）」，反而該選**靜態 QR**（編碼原始 URL、不需 server）。我們選動態純粹因為需求是「可修改 + 可追蹤」。
 
@@ -723,3 +723,35 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 限速值皆為 Terraform 變數(`waf_rate_limit_api`、`waf_rate_limit_global`、`apigw_throttle_rate/burst`)。成本:WAF web ACL ~$5/月 + 每 rule ~$1/月 + ~$0.60/百萬請求;API GW 節流免費。
 
 > 純 infra 變更,不動 app(本機/容器行為不變)。已寫好並 `terraform validate`/`plan` 通過(未 apply)。若日後要 per-endpoint 精細(例如只嚴格限 `create`),再加 app-level(FastAPI + Redis token bucket)。
+
+---
+
+## 附錄 F：Auth & Isolation（已實作,多租戶）
+
+目標:每個使用者只能管理自己的 QR。採 **AWS Cognito + API Gateway JWT authorizer**。
+
+**Auth 邊界**:
+- **需登入(JWT)**:`POST /api/v1/qr/create`、`GET /api/v1/qr`(列我的)、`GET/PATCH/DELETE /api/v1/qr/{token}`、`/analytics`、管理頁前端。
+- **公開**:`/r/{token}`(掃描 redirect)、QR 圖片(`/image`、`/qr-img/*`)、`/health`、`/`、`GET /api/v1/auth/config`。
+
+**流程**:
+```
+前端 → Cognito Hosted UI 登入(OAuth2 code + PKCE)→ 取 id token
+管理 API 請求帶 Authorization: Bearer <id token>
+   │
+   ▼
+API Gateway JWT authorizer 驗 iss/aud/簽章 → 不合法直接 401
+   │ 合法（轉 ALB→EC2）
+   ▼
+FastAPI get_current_user 取 JWT 的 sub 當 owner_id → 端點依 owner 過濾/授權
+```
+
+**資料隔離**:`url_mappings.owner_id`(= Cognito `sub`)+ 索引;list 以 `owner_id` 過濾,get/patch/delete/analytics 非擁有者一律 **404**(不洩漏存在與否)。
+
+**env-gated**:`AUTH_ENABLED` 未設(本機)→ 回 dev user `local-dev`、免登入,SQLite 照跑;雲端由 SSM 注入 `AUTH_ENABLED=true` + `COGNITO_*`。前端 `GET /api/v1/auth/config` 自我設定(關閉時免登入)。
+
+**為何用 id token**:Cognito id token 帶 `aud`=client_id + `email`,API GW authorizer 與 app 都好驗;access token 用 `client_id` claim 較麻煩。
+
+**檔案**:`infra/modules/auth`(user pool/client/domain + authorizer + 6 受保護 routes + SSM)、`app/auth.py`(JWKS 驗證,env-gated)、`app/models.py`(owner_id)、`app/routes.py`(owner scoping + `/auth/config`)、`app/static/index.html`(Hosted UI 登入)。已 `terraform validate`/`plan` 通過(未 apply)。
+
+**不在範圍**:角色分級(admin)、團隊共享、social login。

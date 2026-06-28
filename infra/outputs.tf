@@ -56,6 +56,18 @@ output "waf_web_acl_arn" {
   value = module.edge.waf_web_acl_arn
 }
 
+output "cognito_user_pool_id" {
+  value = module.auth.user_pool_id
+}
+
+output "cognito_client_id" {
+  value = module.auth.client_id
+}
+
+output "cognito_hosted_ui_domain" {
+  value = module.auth.hosted_ui_domain
+}
+
 output "gha_deploy_role_arn" {
   description = "GitHub Actions OIDC 用的 role ARN（填進 workflow / repo variable）"
   value       = module.cicd.deploy_role_arn

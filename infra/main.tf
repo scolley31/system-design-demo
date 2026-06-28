@@ -73,6 +73,16 @@ module "edge" {
   apigw_throttle_burst  = var.apigw_throttle_burst
 }
 
+module "auth" {
+  source         = "./modules/auth"
+  project        = var.project
+  region         = var.region
+  ssm_prefix     = local.ssm_prefix
+  api_id         = module.edge.api_id
+  integration_id = module.edge.integration_id
+  cloudfront_url = module.edge.cloudfront_url
+}
+
 module "cicd" {
   source             = "./modules/cicd"
   project            = var.project

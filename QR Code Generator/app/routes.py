@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import storage
+from .auth import auth_config, get_current_user
 from .cache import cache
 from .database import SessionLocal, get_db
 from .models import ScanEvent, UrlMapping
@@ -41,9 +42,17 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
 
 
 def _get_active_or_404(token: str, db: Session) -> UrlMapping:
-    """管理 API 用：找不到或已軟刪除都當 404（第 11 題：管理面把已刪當『找不到』）。"""
+    """公開圖片用：找不到或已軟刪除都當 404（第 11 題：管理面把已刪當『找不到』）。"""
     mapping = db.query(UrlMapping).filter(UrlMapping.token == token).first()
     if mapping is None or mapping.is_deleted:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return mapping
+
+
+def _get_owned_or_404(token: str, db: Session, user: str) -> UrlMapping:
+    """管理 API 用：非擁有者一律當 404（不洩漏存在與否，多租戶隔離）。"""
+    mapping = db.query(UrlMapping).filter(UrlMapping.token == token).first()
+    if mapping is None or mapping.is_deleted or mapping.owner_id != user:
         raise HTTPException(status_code=404, detail="Not Found")
     return mapping
 
@@ -61,10 +70,22 @@ def _record_scan(token: str, user_agent: str | None, ip: str | None) -> None:
         db.close()
 
 
-# ---------- 管理 API ----------
+# ---------- 公開：前端 auth 設定 ----------
+
+@router.get("/api/v1/auth/config")
+def get_auth_config():
+    """前端用來自我設定登入流程（公開，不含密鑰）。"""
+    return auth_config()
+
+
+# ---------- 管理 API（需登入，依 owner 隔離）----------
 
 @router.post("/api/v1/qr/create", response_model=CreateResponse)
-def create_qr(req: CreateRequest, db: Session = Depends(get_db)):
+def create_qr(
+    req: CreateRequest,
+    db: Session = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
     normalized = _validate(req.url)
     expires_at = _to_naive_utc(req.expires_at)
 
@@ -73,7 +94,7 @@ def create_qr(req: CreateRequest, db: Session = Depends(get_db)):
     for attempt in range(MAX_RETRIES):
         candidate = make_token(normalized, attempt)
         mapping = UrlMapping(
-            token=candidate, original_url=normalized, expires_at=expires_at
+            owner_id=user, token=candidate, original_url=normalized, expires_at=expires_at
         )
         db.add(mapping)
         try:
@@ -103,15 +124,16 @@ def create_qr(req: CreateRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/api/v1/qr")
-def list_qr(db: Session = Depends(get_db)):
-    """列出所有未刪除的 QR（含掃描總數），供前端管理頁使用。
-
-    註：目前系統無使用者/登入概念，故清單為全域。正式版應加 auth 並以 user_id 過濾
-    （對應 PDF FR「用戶可以管理自己創建的 QR Code」）。
+def list_qr(
+    db: Session = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    """列出**目前使用者**未刪除的 QR（含掃描總數），供前端管理頁使用。
+    多租戶隔離：以 owner_id 過濾（對應 PDF FR「用戶可以管理自己創建的 QR Code」）。
     """
     mappings = (
         db.query(UrlMapping)
-        .filter(UrlMapping.is_deleted.is_(False))
+        .filter(UrlMapping.is_deleted.is_(False), UrlMapping.owner_id == user)
         .order_by(UrlMapping.created_at.desc())
         .all()
     )
@@ -135,13 +157,22 @@ def list_qr(db: Session = Depends(get_db)):
 
 
 @router.get("/api/v1/qr/{token}", response_model=QRInfoResponse)
-def get_qr_info(token: str, db: Session = Depends(get_db)):
-    return _get_active_or_404(token, db)
+def get_qr_info(
+    token: str,
+    db: Session = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    return _get_owned_or_404(token, db, user)
 
 
 @router.patch("/api/v1/qr/{token}", response_model=QRInfoResponse)
-def update_qr(token: str, req: UpdateRequest, db: Session = Depends(get_db)):
-    mapping = _get_active_or_404(token, db)
+def update_qr(
+    token: str,
+    req: UpdateRequest,
+    db: Session = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    mapping = _get_owned_or_404(token, db, user)
     changed = False
     if req.url is not None:
         mapping.original_url = _validate(req.url)
@@ -158,8 +189,12 @@ def update_qr(token: str, req: UpdateRequest, db: Session = Depends(get_db)):
 
 
 @router.delete("/api/v1/qr/{token}")
-def delete_qr(token: str, db: Session = Depends(get_db)):
-    mapping = _get_active_or_404(token, db)
+def delete_qr(
+    token: str,
+    db: Session = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    mapping = _get_owned_or_404(token, db, user)
     mapping.is_deleted = True  # 第 12 題：軟刪除
     db.commit()
     cache.delete(token)
@@ -185,8 +220,12 @@ def get_qr_image(
 
 
 @router.get("/api/v1/qr/{token}/analytics")
-def get_analytics(token: str, db: Session = Depends(get_db)):
-    _get_active_or_404(token, db)
+def get_analytics(
+    token: str,
+    db: Session = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    _get_owned_or_404(token, db, user)
     total = (
         db.query(func.count(ScanEvent.id)).filter(ScanEvent.token == token).scalar()
     )

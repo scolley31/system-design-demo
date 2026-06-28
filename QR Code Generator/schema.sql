@@ -9,6 +9,7 @@
 -- =========================================================
 CREATE TABLE url_mappings (
     id            INTEGER      NOT NULL PRIMARY KEY,   -- SQLite 自動 rowid；PG 用 SERIAL/IDENTITY
+    owner_id      VARCHAR(64)  NOT NULL,               -- 擁有者 = Cognito sub（本機=local-dev）；多租戶隔離
     token         VARCHAR(8)   NOT NULL,               -- 8 碼 Base62 短碼（第 3 題）
     original_url  TEXT         NOT NULL,               -- 正規化後的目標 URL（第 9 題）
     created_at    DATETIME     NOT NULL,
@@ -21,6 +22,9 @@ CREATE TABLE url_mappings (
 --   (1) 碰撞安全網 —— 直接插入 + 例外重試（第 5 題）
 --   (2) redirect 以 token 查找走 O(log n) B-tree，避免全表掃描（第 2 題 indexing，<100ms）
 CREATE UNIQUE INDEX ix_url_mappings_token ON url_mappings (token);
+
+-- owner_id 索引：加速「列我的 QR」WHERE owner_id=?（Auth & Isolation 多租戶）
+CREATE INDEX ix_url_mappings_owner_id ON url_mappings (owner_id);
 
 
 -- =========================================================
