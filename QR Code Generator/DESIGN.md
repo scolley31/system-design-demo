@@ -641,10 +641,10 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 | Rate limiting | ✅ **已實作**（WAF per-IP + API GW 整體節流） | 見附錄 E |
 | Auth & 多租戶 | ✅ **已實作**（Cognito + API GW JWT authorizer + owner_id 隔離） | 見附錄 F |
 | **Monitoring / Alerting** | **無** | metrics、結構化日誌、服務掛掉告警（動態 QR 的 server 是 SPOF） |
-| Data cleanup | 設計有 cron（第 13 題），未實作 | 定期清過期/長期未點擊，避免 DB bloat |
+| Data cleanup | ✅ **已實作**（EventBridge + Lambda 定時清過期/軟刪超期） | 見附錄 G |
 | Caching / CDN | 記憶體 dict + 即時生圖 | Redis + object store + CDN（第 7/15 題） |
 
-**Rate limiting**(附錄 E)與 **Auth/多租戶**(附錄 F)已實作;剩下 **monitoring/alerting**、**全面 error handling**、**data cleanup cron** 待補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
+**Rate limiting**(附錄 E)、**Auth/多租戶**(附錄 F)、**Data cleanup cron**(附錄 G)已實作;剩下 **monitoring/alerting**、**全面 error handling** 待補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
 
 > **靜態的反向場景**：若需求是「印好不改、離線可用、極高可靠（如醫療器材）」，反而該選**靜態 QR**（編碼原始 URL、不需 server）。我們選動態純粹因為需求是「可修改 + 可追蹤」。
 
@@ -755,3 +755,31 @@ FastAPI get_current_user 取 JWT 的 sub 當 owner_id → 端點依 owner 過濾
 **檔案**:`infra/modules/auth`(user pool/client/domain + authorizer + 6 受保護 routes + SSM)、`app/auth.py`(JWKS 驗證,env-gated)、`app/models.py`(owner_id)、`app/routes.py`(owner scoping + `/auth/config`)、`app/static/index.html`(Hosted UI 登入)。已 `terraform validate`/`plan` 通過(未 apply)。
 
 **不在範圍**:角色分級(admin)、團隊共享、social login。
+
+---
+
+## 附錄 G：Data Cleanup Cron（已實作）
+
+目標:定時清掉不再需要的列,避免 DB bloat(week1 的「過期資料永不刪除」)。**EventBridge Scheduler + Lambda**(AWS 原生、與 app 實例解耦)。
+
+```
+EventBridge Scheduler（每日 03:00 UTC,cron 可調）
+        │ 觸發
+        ▼
+   Lambda（VPC 私有子網,SG 允許進 RDS）
+        │ 連 RDS（pg8000 純 Python 驅動）
+        ▼
+   DELETE：① 過期 QR（expires_at < now - grace）
+           ② 軟刪除超期（is_deleted 且 updated_at < now - retention）
+           連帶刪除上述 token 的 scan_events
+```
+
+**規則(Terraform 變數可調)**:`cleanup_expired_grace_days`(30)、`cleanup_deleted_retention_days`(30)、`cleanup_schedule`(`cron(0 3 * * ? *)`)。
+
+**單一來源 + 免打包痛點**:清理邏輯是自足腳本 `infra/modules/cleanup/src/cleanup.py`(SQLAlchemy + `text()` SQL);Lambda 用**純 Python 的 pg8000**(zip 打包 sqlalchemy/pg8000,無原生二進位,Terraform `archive_file` 產生);**本機用同一支對 SQLite 測**(`DATABASE_URL=sqlite:///... python cleanup.py`,已驗證刪除與計數正確)。
+
+**為何 Lambda 不用 app 內排程**:多 app 實例會重複跑、需 leader election;Lambda 與實例解耦、單次觸發、獨立擴縮。
+
+**檔案**:`infra/modules/cleanup`(Lambda + EventBridge Scheduler + lambda SG→RDS ingress + IAM + 打包)、`src/cleanup.py`。已 `terraform validate`/`plan` 通過(未 apply)。
+
+**不在範圍**:scan_events 通用時間修剪、長期未點擊 email 通知(SES)、冷儲存歸檔。

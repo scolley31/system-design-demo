@@ -68,6 +68,14 @@ output "cognito_hosted_ui_domain" {
   value = module.auth.hosted_ui_domain
 }
 
+output "cleanup_lambda_name" {
+  value = module.cleanup.lambda_name
+}
+
+output "cleanup_schedule_name" {
+  value = module.cleanup.schedule_name
+}
+
 output "gha_deploy_role_arn" {
   description = "GitHub Actions OIDC 用的 role ARN（填進 workflow / repo variable）"
   value       = module.cicd.deploy_role_arn

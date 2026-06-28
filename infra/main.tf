@@ -83,6 +83,18 @@ module "auth" {
   cloudfront_url = module.edge.cloudfront_url
 }
 
+module "cleanup" {
+  source                 = "./modules/cleanup"
+  project                = var.project
+  vpc_id                 = module.network.vpc_id
+  private_subnet_ids     = module.network.private_subnet_ids
+  rds_sg_id              = module.security.rds_sg_id
+  database_url           = module.data.database_url
+  expired_grace_days     = var.cleanup_expired_grace_days
+  deleted_retention_days = var.cleanup_deleted_retention_days
+  schedule               = var.cleanup_schedule
+}
+
 module "cicd" {
   source             = "./modules/cicd"
   project            = var.project

@@ -14,6 +14,11 @@ output "database_url_ssm" {
   value = aws_ssm_parameter.database_url.name
 }
 
+output "database_url" {
+  value     = aws_ssm_parameter.database_url.value
+  sensitive = true
+}
+
 output "redis_url_ssm" {
   value = aws_ssm_parameter.redis_url.name
 }

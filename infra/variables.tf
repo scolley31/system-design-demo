@@ -120,3 +120,17 @@ variable "apigw_throttle_burst" {
   type    = number
   default = 2000
 }
+
+# --- Data cleanup cron ---
+variable "cleanup_expired_grace_days" {
+  type    = number
+  default = 30 # 過期後保留天數才物理刪除
+}
+variable "cleanup_deleted_retention_days" {
+  type    = number
+  default = 30 # 軟刪除後保留天數才物理刪除
+}
+variable "cleanup_schedule" {
+  type    = string
+  default = "cron(0 3 * * ? *)" # 每日 03:00 UTC
+}

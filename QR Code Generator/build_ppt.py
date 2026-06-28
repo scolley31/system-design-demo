@@ -673,7 +673,7 @@ grows = [
     ("Rate limiting", "✅ 已實作", "WAF per-IP + API GW 節流"),
     ("Auth & 多租戶", "✅ 已實作", "Cognito + JWT + owner_id 隔離"),
     ("Monitoring / Alerting", "無", "metrics · 日誌 · 掛掉告警"),
-    ("Data cleanup", "設計有 cron，未實作", "定期清過期/未點擊，防 DB bloat"),
+    ("Data cleanup", "✅ 已實作", "EventBridge + Lambda 定時清理"),
     ("Caching / CDN", "記憶體 + 即時生圖", "Redis + object store + CDN"),
 ]
 gt = s.shapes.add_table(len(grows), 3, Inches(0.6), Inches(2.15), Inches(12.15), Inches(4.0)).table
@@ -790,6 +790,37 @@ bullets(s, Inches(0.6), Inches(5.4), Inches(12.3), Inches(1.6), [
     "env-gated:本機不設 AUTH_ENABLED → dev user『local-dev』、免登入,SQLite 照跑",
     "純 env 開關 + 新 infra(Cognito/authorizer),已 validate/plan 通過(未 apply)",
 ], size=13, gap=7)
+
+# ============ Slide: Data Cleanup Cron ============
+s = prs.slides.add_slide(BLANK)
+header(s, "可靠性 · DATA CLEANUP", "定時清理:EventBridge + Lambda（防 DB bloat）")
+box(s, Inches(0.6), Inches(2.1), Inches(3.0), Inches(0.95), "EventBridge Scheduler\n每日 03:00 UTC", ANALYTICS, WHITE, 12)
+box(s, Inches(4.0), Inches(2.1), Inches(3.0), Inches(0.95), "Lambda (VPC)\npg8000 純 Python", APP, WHITE, 12)
+box(s, Inches(7.4), Inches(2.1), Inches(2.6), Inches(0.95), "RDS PostgreSQL\nDELETE", DB, WHITE, 12)
+arrow(s, Inches(3.6), Inches(2.57), Inches(4.0), Inches(2.57))
+arrow(s, Inches(7.0), Inches(2.57), Inches(7.4), Inches(2.57))
+crows = [
+    ("清理目標", "條件", "預設保留"),
+    ("過期 QR", "expires_at < now - grace", "30 天"),
+    ("軟刪除超期", "is_deleted 且 updated_at < now - retention", "30 天"),
+    ("連帶", "上述 token 的 scan_events 一併刪", "—"),
+]
+ct = s.shapes.add_table(len(crows), 3, Inches(0.6), Inches(3.5), Inches(12.15), Inches(1.9)).table
+ct.columns[0].width = Inches(2.6); ct.columns[1].width = Inches(7.05); ct.columns[2].width = Inches(2.5)
+for r in range(len(crows)):
+    for c in range(3):
+        cell = ct.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = crows[r][c]
+        _font(run, 12, WHITE if r == 0 else INK, r == 0 or c == 0)
+bullets(s, Inches(0.6), Inches(5.6), Inches(12.3), Inches(1.4), [
+    "單一來源:cleanup.py(SQLAlchemy+text SQL)Lambda 與本機共用;Lambda 用純 Python pg8000 免二進位打包",
+    "與 app 實例解耦(不用 app 內排程,免多實例重複跑/leader election);保留天數皆 Terraform 變數可調",
+], size=13, gap=8)
 
 # ============ Slide: CI/CD Flow ============
 s = prs.slides.add_slide(BLANK)

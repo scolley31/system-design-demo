@@ -109,6 +109,8 @@ curl http://localhost:8000/api/v1/qr/{token}/analytics
 
 **Auth & 多租戶**:**AWS Cognito + API Gateway JWT authorizer**——管理端點需登入(Bearer id token,未帶 → 401),資料以 `owner_id`(Cognito sub)隔離,每人只見自己的 QR;掃描 redirect / QR 圖維持公開。env-gated:本機不設 `AUTH_ENABLED` → 免登入(dev user)。詳見 DESIGN 附錄 F。
 
+**Data cleanup cron**:**EventBridge Scheduler + Lambda**(每日)定時清掉過期 QR(`expires_at` 超過保留期)與軟刪超期列,連帶刪其 `scan_events`,避免 DB bloat。清理腳本 `infra/modules/cleanup/src/cleanup.py` 可本機對 SQLite 跑測試。詳見 DESIGN 附錄 G。
+
 env（雲端由 EC2 容器注入，本機留空即走原型路徑）：`DATABASE_URL`、`REDIS_URL`、`S3_BUCKET`、`CDN_BASE`、`BASE_URL`。
 - `app/cache.py`：有 `REDIS_URL` → Redis，否則記憶體。
 - `app/storage.py`：有 `S3_BUCKET` → 上傳 S3 並回 CDN URL，否則 `/image` 即時生圖。
