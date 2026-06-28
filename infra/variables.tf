@@ -102,3 +102,21 @@ variable "github_repo" {
   type    = string
   default = "scolley31/system-design-demo"
 }
+
+# --- Rate limiting ---
+variable "waf_rate_limit_api" {
+  type    = number
+  default = 300 # per-IP / 5 分（/api/*）
+}
+variable "waf_rate_limit_global" {
+  type    = number
+  default = 2000 # per-IP / 5 分（全域）
+}
+variable "apigw_throttle_rate" {
+  type    = number
+  default = 1000 # API GW 整體 req/s
+}
+variable "apigw_throttle_burst" {
+  type    = number
+  default = 2000
+}

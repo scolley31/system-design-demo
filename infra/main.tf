@@ -55,14 +55,22 @@ module "compute" {
 }
 
 module "edge" {
-  source             = "./modules/edge"
-  project            = var.project
-  region             = var.region
-  vpc_id             = module.network.vpc_id
-  private_subnet_ids = module.network.private_subnet_ids
-  alb_listener_arn   = module.compute.alb_listener_arn
-  ssm_prefix         = local.ssm_prefix
-  ec2_role_name      = module.compute.ec2_role_name
+  source = "./modules/edge"
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+  project               = var.project
+  region                = var.region
+  vpc_id                = module.network.vpc_id
+  private_subnet_ids    = module.network.private_subnet_ids
+  alb_listener_arn      = module.compute.alb_listener_arn
+  ssm_prefix            = local.ssm_prefix
+  ec2_role_name         = module.compute.ec2_role_name
+  waf_rate_limit_api    = var.waf_rate_limit_api
+  waf_rate_limit_global = var.waf_rate_limit_global
+  apigw_throttle_rate   = var.apigw_throttle_rate
+  apigw_throttle_burst  = var.apigw_throttle_burst
 }
 
 module "cicd" {

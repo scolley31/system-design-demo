@@ -89,9 +89,10 @@ curl http://localhost:8000/api/v1/qr/{token}/analytics
 ### 架構
 
 ```
-           ┌──────── CloudFront (CDN) ────────┐
-  Client ──┤  /qr-img/*       → S3 (QR PNG)    │ 長快取
-           │  /, /r/*, /api/* → API Gateway    │ redirect 不快取
+  Client ─► [WAF per-IP rate limit] ─► CloudFront (CDN)
+           ┌──────────────────────────────────┐
+           │  /qr-img/*       → S3 (QR PNG)    │ 長快取
+           │  /, /r/*, /api/* → API Gateway    │ redirect 不快取 · 整體節流
            └─────────────┬────────────────────┘
                          │ VPC Link
                          ▼
@@ -103,6 +104,8 @@ curl http://localhost:8000/api/v1/qr/{token}/analytics
 
   SSM Parameter Store(設定) · Secrets Manager(DB 密碼) · ECR(映像) · NAT Gateway
 ```
+
+**Rate limiting(防 script 灌爆)**:CloudFront 掛 **WAF rate-based rule(per-IP)**——`/api/*` 300/5分、全域 2000/5分,超量回 403;API Gateway 另有整體節流(429)當後端 backstop。限速值為 Terraform 變數可調。詳見 DESIGN 附錄 E。
 
 env（雲端由 EC2 容器注入，本機留空即走原型路徑）：`DATABASE_URL`、`REDIS_URL`、`S3_BUCKET`、`CDN_BASE`、`BASE_URL`。
 - `app/cache.py`：有 `REDIS_URL` → Redis，否則記憶體。

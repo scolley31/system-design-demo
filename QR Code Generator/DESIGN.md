@@ -638,13 +638,13 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 | 面向 | 原型現況 | Production 需要 |
 |---|---|---|
 | Error handling | 驗證回 400，但未全面 | 全面輸入驗證、結構化錯誤回應、不因壞輸入 crash |
-| **Rate limiting** | **無** | create 等端點限流，防 script 灌爆 API |
+| Rate limiting | ✅ **已實作**（WAF per-IP + API GW 整體節流） | 見附錄 E |
 | **Auth & 多租戶** | **無 user 概念，資料全域** | 登入 + `user_id` 隔離（清單/權限）、見 PDF FR |
 | **Monitoring / Alerting** | **無** | metrics、結構化日誌、服務掛掉告警（動態 QR 的 server 是 SPOF） |
 | Data cleanup | 設計有 cron（第 13 題），未實作 | 定期清過期/長期未點擊，避免 DB bloat |
 | Caching / CDN | 記憶體 dict + 即時生圖 | Redis + object store + CDN（第 7/15 題） |
 
-其中 **rate limiting、auth/多租戶、monitoring** 是目前設計**完全沒談**的三塊，列為 production 前必補。注意：動態 QR 把 server 變成 single point of failure，所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
+**Rate limiting 已實作**(WAF per-IP + API GW 整體節流,見附錄 E);剩下 **auth/多租戶、monitoring** 是還沒做的兩塊,列為 production 前必補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
 
 > **靜態的反向場景**：若需求是「印好不改、離線可用、極高可靠（如醫療器材）」，反而該選**靜態 QR**（編碼原始 URL、不需 server）。我們選動態純粹因為需求是「可修改 + 可追蹤」。
 
@@ -657,9 +657,10 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 ### 部署架構
 
 ```
-                 ┌──────────── CloudFront (CDN, *.cloudfront.net) ────────────┐
-   Client ───────┤  /qr-img/*       ──────────────► S3 (QR PNG, private+OAC)   │ 長快取
-                 │  /, /r/*, /api/* ──► API Gateway (HTTP API)                  │ redirect 不快取
+   Client ──► [WAF per-IP rate limit] ──► CloudFront (CDN, *.cloudfront.net)
+                 ┌──────────────────────────────────────────────────────────┐
+                 │  /qr-img/*       ──────────────► S3 (QR PNG, private+OAC)   │ 長快取
+                 │  /, /r/*, /api/* ──► API Gateway (HTTP API, 整體節流)         │ redirect 不快取
                  └───────────────────────────────┬────────────────────────────┘
                                                   │ VPC Link
                                                   ▼
@@ -698,3 +699,27 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 2. **CI 在 amd64 runner build、但 EC2 是 arm64(t4g)** → 容器 exec format error、ALB 502。修法：workflow 改用 **buildx + QEMU build `linux/arm64`**。
 
 > 教訓呼應附錄 C：動態 QR 的 server 是 SPOF，cache/CDN/monitoring 是必要代價；且**跨架構容器**與**最小權限 IAM** 是 prototype→production 常見的坑。
+
+---
+
+## 附錄 E：Rate Limiting（已實作，prototype→production 第一項）
+
+目標:防 script 惡意灌爆 API。採**縱深防禦**,兩層:
+
+| 層 | 機制 | 擋什麼 | 回應碼 |
+|---|---|---|---|
+| 邊緣 CloudFront | **WAF rate-based rule（per-IP）** | 單一 IP 狂打(主要防線),邊緣就擋、不進 origin | **403** |
+| API Gateway stage | **throttling（burst + rate,整體）** | 後端總量保護(backstop) | **429** |
+
+**為什麼不能只靠 API Gateway**:我們的是 **HTTP API (v2)**,內建節流只有「整體吞吐」、**非 per-IP**;且不支援 usage plan + API key(REST API v1 才有),匿名 QR 掃描也不適用。所以「擋單一 IP 濫用」必須靠 **WAF**(per-IP)。
+
+**WAF 規則(`infra/modules/edge`,scope=CLOUDFRONT 建在 us-east-1)**:
+- Rule 1 `api-writes-rate`:scope-down `/api/*`,per-IP **300 / 5 分** → block。
+- Rule 2 `global-rate`:全域(含 `/r/*`),per-IP **2000 / 5 分** → block。
+- 都開 CloudWatch metrics(`BlockedRequests` / `AllowedRequests`)。
+
+**API Gateway stage 節流**:整體 `rate=1000 req/s`、`burst=2000`(可調變數)。
+
+限速值皆為 Terraform 變數(`waf_rate_limit_api`、`waf_rate_limit_global`、`apigw_throttle_rate/burst`)。成本:WAF web ACL ~$5/月 + 每 rule ~$1/月 + ~$0.60/百萬請求;API GW 節流免費。
+
+> 純 infra 變更,不動 app(本機/容器行為不變)。已寫好並 `terraform validate`/`plan` 通過(未 apply)。若日後要 per-endpoint 精細(例如只嚴格限 `create`),再加 app-level(FastAPI + Redis token bucket)。

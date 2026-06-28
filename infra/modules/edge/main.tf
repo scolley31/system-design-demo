@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    aws = {
+      source                = "hashicorp/aws"
+      configuration_aliases = [aws.us_east_1] # CLOUDFRONT scope 的 WAF 必須在 us-east-1
+    }
+  }
+}
+
 data "aws_caller_identity" "current" {}
 
 # ---------- API Gateway HTTP API → VPC Link → 內部 ALB ----------
@@ -50,6 +59,12 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.this.id
   name        = "$default"
   auto_deploy = true
+
+  # 整體吞吐節流（後端 backstop，超過回 429）。per-IP 由 CloudFront 上的 WAF 負責。
+  default_route_settings {
+    throttling_rate_limit  = var.apigw_throttle_rate
+    throttling_burst_limit = var.apigw_throttle_burst
+  }
 }
 
 # ---------- S3 (QR 圖片) ----------
@@ -88,10 +103,83 @@ locals {
   api_host = replace(aws_apigatewayv2_api.this.api_endpoint, "https://", "")
 }
 
+# ---------- WAF（per-IP rate limiting，掛 CloudFront）----------
+# scope=CLOUDFRONT 的 web ACL 必須建在 us-east-1
+resource "aws_wafv2_web_acl" "cf" {
+  provider    = aws.us_east_1
+  name        = "${var.project}-cf-waf"
+  description = "${var.project} per-IP rate limiting"
+  scope       = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  # Rule 1：/api/* 寫入/管理路徑，較嚴的 per-IP 上限
+  rule {
+    name     = "api-writes-rate"
+    priority = 1
+    action {
+      block {}
+    }
+    statement {
+      rate_based_statement {
+        limit              = var.waf_rate_limit_api
+        aggregate_key_type = "IP"
+        scope_down_statement {
+          byte_match_statement {
+            positional_constraint = "STARTS_WITH"
+            search_string         = "/api/"
+            field_to_match {
+              uri_path {}
+            }
+            text_transformation {
+              priority = 0
+              type     = "NONE"
+            }
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project}-api-writes-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # Rule 2：全域 per-IP 上限（涵蓋 /r/* 轉址等）
+  rule {
+    name     = "global-rate"
+    priority = 2
+    action {
+      block {}
+    }
+    statement {
+      rate_based_statement {
+        limit              = var.waf_rate_limit_global
+        aggregate_key_type = "IP"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project}-global-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.project}-cf-waf"
+    sampled_requests_enabled   = true
+  }
+}
+
 resource "aws_cloudfront_distribution" "this" {
   enabled         = true
   comment         = "${var.project} front door"
   is_ipv6_enabled = true
+  web_acl_id      = aws_wafv2_web_acl.cf.arn
 
   # Origin 1: API Gateway (動態：/, /r/*, /api/*)
   origin {

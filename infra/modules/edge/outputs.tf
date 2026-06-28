@@ -13,3 +13,7 @@ output "api_endpoint" {
 output "qr_bucket" {
   value = aws_s3_bucket.qr.bucket
 }
+
+output "waf_web_acl_arn" {
+  value = aws_wafv2_web_acl.cf.arn
+}

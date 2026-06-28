@@ -52,6 +52,10 @@ output "qr_bucket" {
   value = module.edge.qr_bucket
 }
 
+output "waf_web_acl_arn" {
+  value = module.edge.waf_web_acl_arn
+}
+
 output "gha_deploy_role_arn" {
   description = "GitHub Actions OIDC 用的 role ARN（填進 workflow / repo variable）"
   value       = module.cicd.deploy_role_arn

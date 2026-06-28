@@ -670,7 +670,7 @@ textbox(s, Inches(0.6), Inches(1.5), Inches(12.2), Inches(0.5), [
 grows = [
     ("面向", "原型現況", "Production 需要"),
     ("Error handling", "驗證回 400，未全面", "全面驗證 · 結構化錯誤 · 不 crash"),
-    ("Rate limiting", "無", "端點限流，防 script 灌爆"),
+    ("Rate limiting", "✅ 已實作", "WAF per-IP + API GW 節流"),
     ("Auth & 多租戶", "無 user，資料全域", "登入 + user_id 隔離"),
     ("Monitoring / Alerting", "無", "metrics · 日誌 · 掛掉告警"),
     ("Data cleanup", "設計有 cron，未實作", "定期清過期/未點擊，防 DB bloat"),
@@ -701,9 +701,9 @@ textbox(s, Inches(0.6), Inches(6.35), Inches(12.2), Inches(0.5), [
 s = prs.slides.add_slide(BLANK)
 header(s, "部署 · AWS", "AWS 部署架構（Terraform，已上線）")
 box(s, Inches(0.5), Inches(2.7), Inches(1.7), Inches(0.85), "Client", CLIENT, WHITE, 13)
-box(s, Inches(2.45), Inches(2.7), Inches(2.0), Inches(0.85), "CloudFront\n(CDN)", CDN, WHITE, 12)
+box(s, Inches(2.45), Inches(2.7), Inches(2.0), Inches(0.85), "CloudFront\n(CDN + WAF)", CDN, WHITE, 12)
 box(s, Inches(2.45), Inches(1.55), Inches(2.0), Inches(0.7), "S3 (QR PNG)\n/qr-img/*", ANALYTICS, WHITE, 11)
-box(s, Inches(4.7), Inches(2.7), Inches(2.0), Inches(0.85), "API Gateway\n(HTTP API)", GATEWAY, WHITE, 12)
+box(s, Inches(4.7), Inches(2.7), Inches(2.0), Inches(0.85), "API Gateway\n(HTTP API · 節流)", GATEWAY, WHITE, 12)
 box(s, Inches(6.95), Inches(2.7), Inches(1.6), Inches(0.85), "內部 ALB\n/health", APP, WHITE, 12)
 box(s, Inches(8.8), Inches(2.7), Inches(2.1), Inches(0.95), "EC2 ASG\nDocker/gunicorn", INK, WHITE, 12)
 box(s, Inches(8.8), Inches(3.95), Inches(2.1), Inches(0.7), "RDS PostgreSQL", DB, WHITE, 11)
@@ -717,8 +717,44 @@ arrow(s, Inches(9.85), Inches(3.65), Inches(9.85), Inches(3.95), color=MUTED, wi
 arrow(s, Inches(9.85), Inches(4.65), Inches(9.85), Inches(4.8), color=MUTED, width=1.2)
 textbox(s, Inches(4.7), Inches(3.62), Inches(2.2), Inches(0.3), [("VPC Link", 10, MUTED, False)])
 textbox(s, Inches(0.5), Inches(5.7), Inches(12.3), Inches(1.4), [
-    ("/qr-img/* → S3 長快取;/, /r/*, /api/* → API Gateway,redirect 不快取(第 6 題每次回源)。", 13, INK, False, 4),
+    ("WAF(per-IP rate limit)掛在 CloudFront 邊緣;/qr-img/* → S3 長快取;/, /r/*, /api/* → API Gateway,redirect 不快取。", 13, INK, False, 4),
     ("設定/密鑰:SSM Parameter Store(DATABASE_URL/REDIS_URL/S3_BUCKET/CDN_BASE/BASE_URL/IMAGE_URI)·Secrets Manager(DB 密碼)·ECR·NAT Gateway。", 12, MUTED, False)])
+
+# ============ Slide: Rate Limiting ============
+s = prs.slides.add_slide(BLANK)
+header(s, "安全 · RATE LIMITING", "防灌爆：WAF per-IP + API Gateway 節流（縱深）")
+box(s, Inches(0.5), Inches(2.0), Inches(1.8), Inches(0.9), "掃描者 / Script", CLIENT, WHITE, 12)
+box(s, Inches(2.65), Inches(2.0), Inches(2.5), Inches(0.9), "WAF (per-IP)\n超量 → 403", RED, WHITE, 12)
+box(s, Inches(5.55), Inches(2.0), Inches(1.9), Inches(0.9), "CloudFront", CDN, WHITE, 12)
+box(s, Inches(7.85), Inches(2.0), Inches(2.7), Inches(0.9), "API GW 整體節流\n超量 → 429", GATEWAY, WHITE, 12)
+box(s, Inches(10.95), Inches(2.0), Inches(1.85), Inches(0.9), "ALB → EC2", APP, WHITE, 11)
+arrow(s, Inches(2.3), Inches(2.45), Inches(2.65), Inches(2.45))
+arrow(s, Inches(5.15), Inches(2.45), Inches(5.55), Inches(2.45))
+arrow(s, Inches(7.45), Inches(2.45), Inches(7.85), Inches(2.45))
+arrow(s, Inches(10.55), Inches(2.45), Inches(10.95), Inches(2.45))
+rlrows = [
+    ("層", "機制", "上限", "超量"),
+    ("CloudFront WAF", "per-IP · /api/*", "300 / 5 分 / IP", "403"),
+    ("CloudFront WAF", "per-IP · 全域", "2000 / 5 分 / IP", "403"),
+    ("API Gateway", "整體 throttle", "1000 req/s · burst 2000", "429"),
+]
+rt = s.shapes.add_table(len(rlrows), 4, Inches(0.6), Inches(3.3), Inches(12.15), Inches(2.0)).table
+rt.columns[0].width = Inches(3.0); rt.columns[1].width = Inches(3.0); rt.columns[2].width = Inches(4.15); rt.columns[3].width = Inches(2.0)
+for r in range(len(rlrows)):
+    for c in range(4):
+        cell = rt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = rlrows[r][c]
+        _font(run, 12, WHITE if r == 0 else INK, r == 0 or c == 0)
+bullets(s, Inches(0.6), Inches(5.55), Inches(12.3), Inches(1.6), [
+    "為何不能只靠 API GW:HTTP API 內建節流是『整體』非 per-IP、也無 API key → 擋單一 IP 濫用必須靠 WAF",
+    "限速值皆 Terraform 變數可調;WAF 阻擋數進 CloudWatch（BlockedRequests）",
+    "純 infra 變更,不動 app;已 validate/plan 通過(未 apply)",
+], size=13, gap=7)
 
 # ============ Slide: CI/CD Flow ============
 s = prs.slides.add_slide(BLANK)
@@ -763,6 +799,58 @@ for i, it in enumerate(bullets_dark):
     p.space_after = Pt(12)
     r = p.add_run(); r.text = "✓  " + it
     _font(r, 16, RGBColor(0xE2, 0xE8, 0xF0), False)
+
+# ============ Slide: 下週展開（Prototype → Production gap）============
+s = prs.slides.add_slide(BLANK)
+header(s, "下週預告 · NEXT WEEK", "從 Prototype 到 Production 的巨大鴻溝")
+textbox(s, Inches(0.6), Inches(1.5), Inches(12), Inches(0.4),
+        [("快速掃過，建立全貌 — 下週 Deep Dive 才是主菜", 14, MUTED, False)])
+
+gap_cards = [
+    ("[Error Handling]", "遇到不合法輸入直接 Crash。", ANALYTICS),
+    ("[Rate Limiting]", "毫無防護，極易被 Script 惡意灌爆 API。", ANALYTICS),
+    ("[Auth & Isolation]", "缺乏多租戶概念，資料全公開。", ANALYTICS),
+    ("[Monitoring]", "服務掛了完全沒有 Alerting，處於盲飛狀態。", GATEWAY),
+    ("[Data Cleanup]", "過期資料永不刪除，一年後 DB 將面臨嚴重 Bloat。", GATEWAY),
+    ("[Caching / CDN]", "每次轉址都直擊 DB，流量一來直接癱瘓。\n→ 下週 Deep Dive 展開", GATEWAY),
+]
+cw = Inches(3.95); ch = Inches(1.75); gx = Inches(0.27); gy = Inches(0.3)
+x0 = Inches(0.6); y0 = Inches(2.15)
+for i, (title, desc, accent) in enumerate(gap_cards):
+    col = i % 3
+    row = i // 3
+    x = x0 + col * (cw + gx)
+    y = y0 + row * (ch + gy)
+    card = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, cw, ch)
+    card.fill.solid(); card.fill.fore_color.rgb = LIGHT; card.line.color.rgb = LIGHT; card.shadow.inherit = False
+    bar = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, Inches(0.09), ch)
+    bar.fill.solid(); bar.fill.fore_color.rgb = accent; bar.line.fill.background(); bar.shadow.inherit = False
+    textbox(s, x + Inches(0.3), y + Inches(0.2), cw - Inches(0.5), ch - Inches(0.3),
+            [(title, 16, INK, True, 8), (desc, 13, MUTED, False)])
+
+# ============ Slide: 下週預告 — 壓力測試與極限擴展 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "下週預告 · DEEP DIVE", "壓力測試與極限擴展 (Deep Dive)")
+# 左：QPS 暴增
+textbox(s, Inches(0.6), Inches(2.2), Inches(6.0), Inches(3.2), [
+    ("1,000 QPS  →  50,000 QPS", 26, ACCENT, True, 16),
+    ("當大型客戶上線，", 19, INK, True, 4),
+    ("流量瞬間暴增 50 倍，", 19, INK, True, 4),
+    ("這個架構哪會先崩潰？", 19, INK, True),
+])
+# 右：主題 bullets
+bullets(s, Inches(7.0), Inches(2.25), Inches(5.8), Inches(2.4), [
+    "流量暴增 Scenario 推演（Server vs DB vs Network）",
+    "Event-Driven Analytics Pipeline 架構",
+    "System Design 面試實戰答題框架",
+], size=16, gap=14)
+# 右下：課前準備
+prep = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(7.0), Inches(4.75), Inches(5.8), Inches(1.15))
+prep.fill.solid(); prep.fill.fore_color.rgb = LIGHT; prep.line.color.rgb = LIGHT; prep.shadow.inherit = False
+pbar = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(7.0), Inches(4.75), Inches(0.09), Inches(1.15))
+pbar.fill.solid(); pbar.fill.fore_color.rgb = GATEWAY; pbar.line.fill.background(); pbar.shadow.inherit = False
+textbox(s, Inches(7.3), Inches(4.95), Inches(5.3), Inches(0.9), [
+    ("課前準備", 15, INK, True, 6), ("複習教材 Deep Dive 章節", 14, MUTED, False)])
 
 prs.save("QR_Code_Generator.pptx")
 print("saved QR_Code_Generator.pptx ·", len(prs.slides._sldIdLst), "slides")
