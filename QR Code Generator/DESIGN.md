@@ -637,14 +637,14 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 
 | 面向 | 原型現況 | Production 需要 |
 |---|---|---|
-| Error handling | 驗證回 400，但未全面 | 全面輸入驗證、結構化錯誤回應、不因壞輸入 crash |
+| Error handling | ✅ **已實作**（全域例外處理 + 依賴降級 + request id + 輸入健全化） | 見附錄 I |
 | Rate limiting | ✅ **已實作**（WAF per-IP + API GW 整體節流） | 見附錄 E |
 | Auth & 多租戶 | ✅ **已實作**（Cognito + API GW JWT authorizer + owner_id 隔離） | 見附錄 F |
 | Monitoring / Alerting | ✅ **已實作**（CloudWatch alarms→SNS email + Logs + Dashboard + canary） | 見附錄 H |
 | Data cleanup | ✅ **已實作**（EventBridge + Lambda 定時清過期/軟刪超期） | 見附錄 G |
 | Caching / CDN | 記憶體 dict + 即時生圖 | Redis + object store + CDN（第 7/15 題） |
 
-**Rate limiting**(附錄 E)、**Auth/多租戶**(附錄 F)、**Data cleanup cron**(附錄 G)、**Monitoring/Alerting**(附錄 H)已實作;剩下 **全面 error handling**(輸入驗證/結構化錯誤回應)待補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
+**全部已實作** 🎉:**Rate limiting**(附錄 E)、**Auth/多租戶**(附錄 F)、**Data cleanup cron**(附錄 G)、**Monitoring/Alerting**(附錄 H)、**全面 Error handling**(附錄 I)。Prototype→Production 的六項落差全數補齊。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
 
 > **靜態的反向場景**：若需求是「印好不改、離線可用、極高可靠（如醫療器材）」，反而該選**靜態 QR**（編碼原始 URL、不需 server）。我們選動態純粹因為需求是「可修改 + 可追蹤」。
 
@@ -813,3 +813,27 @@ EventBridge Scheduler（每日 03:00 UTC,cron 可調）
 **成本**:alarms ~$0.10/個/月、Logs 量小、**canary 每次執行計費**(每 5 分鐘,數美元/月級距,可調頻率)。
 
 **不在範圍**:Slack/PagerDuty、X-Ray 追蹤、log-based metric filters、自訂業務指標(EMF)。
+
+---
+
+## 附錄 I：全面 Error Handling（已實作）
+
+目標:對壞輸入/依賴故障都優雅回應、不洩漏內部、可追蹤。純 app 層(`app/errors.py` + routes 防禦性處理),錯誤格式沿用 `{"detail"}` 相容前端。
+
+**① 全域例外處理器**:
+- 未捕捉例外 → **500 `{"detail":"Internal server error","request_id":...}`**,traceback 進日誌、**不洩漏**給 client。
+- `RequestValidationError`(含 malformed JSON)→ **422**,把預設 list 轉成**可讀字串** `detail`。
+- HTTPException 維持 `{"detail": ...}`(既有 400/404/410/401)。
+
+**② 依賴降級**(不因依賴故障 500):
+- redirect:Redis 故障 → 吞例外、視為 miss → **走 DB 仍回 302**。
+- create:S3 上傳失敗 → **fallback 回 `/image` 即時生圖**;暖快取 best-effort。
+- update/delete 的 cache invalidation、背景 scan 寫入皆 best-effort(失敗只記 log)。
+
+**③ Request ID / 日誌**:middleware 取 `X-Request-ID` header 或產生 → 存 contextvar、**所有回應(含 4xx/5xx)帶 `X-Request-ID` header** + 錯誤 body 帶 `request_id` + 日誌帶 id(對應附錄 H 的 CloudWatch Logs)。
+
+**④ 輸入健全化**:body 大小上限 64KB → **413**;malformed JSON → 422;URL 長度 2048(第 9 題)。
+
+**驗證(本機)**:malformed JSON→422 字串、缺欄位→422、>64KB→413、`dimension=-5`→500 不洩漏 + 有 `X-Request-ID`、`REDIS_URL` 不可達時 redirect 仍 302(走 DB)。皆通過。
+
+**不在範圍**:重試/熔斷、結構化 JSON log、型別化錯誤碼。

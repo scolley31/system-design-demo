@@ -4,12 +4,14 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
 from .database import Base, engine
+from .errors import setup_error_handling
 from .routes import router
 
 # 原型：啟動時建表。正式版用 migration 工具（如 Alembic）。
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="QR Code Generator")
+setup_error_handling(app)  # 全域例外處理 + request id + body 限制
 app.include_router(router)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")

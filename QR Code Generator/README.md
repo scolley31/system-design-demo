@@ -113,6 +113,8 @@ curl http://localhost:8000/api/v1/qr/{token}/analytics
 
 **Monitoring / Alerting**:CloudWatch **alarms → SNS email**(ALB/RDS/ElastiCache/API GW/Lambda/CloudFront 關鍵指標)、app logs → **CloudWatch Logs**(`awslogs` driver)、**Dashboard**、**Synthetic canary** 每 5 分鐘探測 CloudFront `/health`。`alert_email` 為變數(訂閱需點確認信)。詳見 DESIGN 附錄 H。
 
+**全面 Error handling**(`app/errors.py`):全域例外處理(未捕捉→500 結構化不洩漏、422 驗證轉可讀字串)、**依賴降級**(Redis/S3 故障不 500——redirect 走 DB、create fallback `/image`)、**Request ID**(所有回應帶 `X-Request-ID` + 進日誌)、輸入健全化(body>64KB→413、malformed JSON→422)。沿用 `{"detail"}` 格式。詳見 DESIGN 附錄 I。
+
 env（雲端由 EC2 容器注入，本機留空即走原型路徑）：`DATABASE_URL`、`REDIS_URL`、`S3_BUCKET`、`CDN_BASE`、`BASE_URL`。
 - `app/cache.py`：有 `REDIS_URL` → Redis，否則記憶體。
 - `app/storage.py`：有 `S3_BUCKET` → 上傳 S3 並回 CDN URL，否則 `/image` 即時生圖。

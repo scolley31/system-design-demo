@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from . import storage
 from .auth import auth_config, get_current_user
 from .cache import cache
+from .errors import logger
 from .database import SessionLocal, get_db
 from .models import ScanEvent, UrlMapping
 from .schemas import CreateRequest, CreateResponse, QRInfoResponse, UpdateRequest
@@ -66,6 +67,8 @@ def _record_scan(token: str, user_agent: str | None, ip: str | None) -> None:
     try:
         db.add(ScanEvent(token=token, user_agent=user_agent, ip_address=ip))
         db.commit()
+    except Exception:  # 分析可容忍遺失,失敗只記錄、不影響使用者
+        logger.exception("record_scan failed for token=%s", token)
     finally:
         db.close()
 
@@ -106,14 +109,21 @@ def create_qr(
     if token is None:
         raise HTTPException(status_code=500, detail="Failed to generate unique token")
 
-    cache.set(token, normalized, expires_at)  # 暖快取（也緩解 read replica 複寫延遲，第 16 題）
+    try:  # 暖快取為 best-effort；Redis 故障不應讓 create 失敗
+        cache.set(token, normalized, expires_at)
+    except Exception:
+        logger.exception("cache warm failed for token=%s", token)
 
     short_url = f"{BASE_URL}/r/{token}"
-    # 第 15 題：有設 S3 則預生成上傳，qr_code_url 指 CDN；否則回 /image 即時生圖端點。
+    image_url = f"{BASE_URL}/api/v1/qr/{token}/image"
+    # 第 15 題：有設 S3 則預生成上傳並指向 CDN；S3 失敗則降級回 /image 即時生圖。
+    qr_code_url = image_url
     if storage.enabled():
-        qr_code_url = storage.upload_qr(token, storage.render_qr_png(short_url))
-    else:
-        qr_code_url = f"{BASE_URL}/api/v1/qr/{token}/image"
+        try:
+            qr_code_url = storage.upload_qr(token, storage.render_qr_png(short_url))
+        except Exception:
+            logger.exception("S3 upload failed for token=%s; fallback to /image", token)
+            qr_code_url = image_url
 
     return CreateResponse(
         token=token,
@@ -184,7 +194,10 @@ def update_qr(
     db.refresh(mapping)
     # 第 7 題：先 commit、再 invalidate，避免並發 redirect 在 commit 前回填舊值的競態。
     if changed:
-        cache.delete(token)
+        try:
+            cache.delete(token)
+        except Exception:
+            logger.exception("cache.delete failed for token=%s", token)
     return mapping
 
 
@@ -197,7 +210,10 @@ def delete_qr(
     mapping = _get_owned_or_404(token, db, user)
     mapping.is_deleted = True  # 第 12 題：軟刪除
     db.commit()
-    cache.delete(token)
+    try:
+        cache.delete(token)
+    except Exception:
+        logger.exception("cache.delete failed for token=%s", token)
     return {"detail": "Deleted"}
 
 
@@ -259,11 +275,19 @@ def redirect(
     ip = request.client.host if request.client else None
 
     # 1) 快取命中（第 7 題）。仍需重新檢查惰性過期（第 13 題），過期則當 miss 落到 DB 回 410。
-    cached = cache.get(token)
+    #    Redis 故障時吞掉例外、視為 miss → 改走 DB（依賴降級，redirect 不因 cache 掛掉而 500）。
+    try:
+        cached = cache.get(token)
+    except Exception:
+        logger.exception("cache.get failed for token=%s; falling back to DB", token)
+        cached = None
     if cached is not None:
         url, exp = cached
         if exp is not None and exp < datetime.utcnow():
-            cache.delete(token)
+            try:
+                cache.delete(token)
+            except Exception:
+                logger.exception("cache.delete failed for token=%s", token)
         else:
             background_tasks.add_task(_record_scan, token, user_agent, ip)
             return RedirectResponse(url=url, status_code=302)  # 第 6 題：302
@@ -277,6 +301,9 @@ def redirect(
     if mapping.expires_at and mapping.expires_at < datetime.utcnow():
         raise HTTPException(status_code=410, detail="Gone — link expired")  # 惰性過期 → 410
 
-    cache.set(token, mapping.original_url, mapping.expires_at)  # 回填快取（含 TTL）
+    try:  # 回填快取為 best-effort
+        cache.set(token, mapping.original_url, mapping.expires_at)
+    except Exception:
+        logger.exception("cache.set failed for token=%s", token)
     background_tasks.add_task(_record_scan, token, user_agent, ip)
     return RedirectResponse(url=mapping.original_url, status_code=302)

@@ -669,7 +669,7 @@ textbox(s, Inches(0.6), Inches(1.5), Inches(12.2), Inches(0.5), [
     ("動態 QR 把 server 變成 SPOF → caching + CDN + monitoring 不是加分項，是必要代價。", 13, MUTED, False)])
 grows = [
     ("面向", "原型現況", "Production 需要"),
-    ("Error handling", "驗證回 400，未全面", "全面驗證 · 結構化錯誤 · 不 crash"),
+    ("Error handling", "✅ 已實作", "全域處理 + 降級 + request id"),
     ("Rate limiting", "✅ 已實作", "WAF per-IP + API GW 節流"),
     ("Auth & 多租戶", "✅ 已實作", "Cognito + JWT + owner_id 隔離"),
     ("Monitoring / Alerting", "✅ 已實作", "CloudWatch alarms→SNS + Logs + canary"),
@@ -853,6 +853,34 @@ for r in range(len(mrows)):
 bullets(s, Inches(0.6), Inches(6.4), Inches(12.3), Inches(0.8), [
     "解決『服務掛了沒人知道』;canary 是端到端外部探測(連 CloudFront/整鏈路掛掉都測得到)。純 infra,已 validate/plan 通過(未 apply)。",
 ], size=12, gap=4)
+
+# ============ Slide: Error Handling ============
+s = prs.slides.add_slide(BLANK)
+header(s, "可靠性 · ERROR HANDLING", "壞輸入/依賴故障都優雅回應、不洩漏、可追蹤")
+ehrows = [
+    ("面向", "做法"),
+    ("全域處理器", "未捕捉例外 → 500 不洩漏 + 記 traceback;422 驗證轉可讀字串(沿用 {detail})"),
+    ("依賴降級", "Redis 故障 → redirect 走 DB(不 500);S3 失敗 → create fallback /image"),
+    ("Request ID", "所有回應帶 X-Request-ID + 進日誌/錯誤 body(對應 CloudWatch Logs)"),
+    ("輸入健全化", "body > 64KB → 413;malformed JSON → 422;URL 長度 2048"),
+]
+et = s.shapes.add_table(len(ehrows), 2, Inches(0.6), Inches(2.0), Inches(12.15), Inches(2.7)).table
+et.columns[0].width = Inches(2.4); et.columns[1].width = Inches(9.75)
+for r in range(len(ehrows)):
+    for c in range(2):
+        cell = et.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = ehrows[r][c]
+        _font(run, 12, WHITE if r == 0 else INK, r == 0 or c == 0)
+bullets(s, Inches(0.6), Inches(4.9), Inches(12.3), Inches(2.0), [
+    "錯誤格式沿用 {\"detail\"} → 相容前端;500 只回通用訊息 + request_id,traceback 僅進日誌",
+    "依賴降級讓「Redis/S3 掛掉」不再連帶整個請求 500;分析寫入失敗也只記 log",
+    "本機驗證:422/413/500(含 X-Request-ID)+ REDIS_URL 不可達時 redirect 仍 302。純 app,不動 infra",
+], size=13, gap=8)
 
 # ============ Slide: CI/CD Flow ============
 s = prs.slides.add_slide(BLANK)
