@@ -954,29 +954,61 @@ for i, (title, desc, accent) in enumerate(gap_cards):
     textbox(s, x + Inches(0.3), y + Inches(0.2), cw - Inches(0.5), ch - Inches(0.3),
             [(title, 16, INK, True, 8), (desc, 13, MUTED, False)])
 
-# ============ Slide: 下週預告 — 壓力測試與極限擴展 ============
+# ============ Slide: 極限擴展 — 50x 推演 ============
 s = prs.slides.add_slide(BLANK)
-header(s, "下週預告 · DEEP DIVE", "壓力測試與極限擴展 (Deep Dive)")
-# 左：QPS 暴增
-textbox(s, Inches(0.6), Inches(2.2), Inches(6.0), Inches(3.2), [
-    ("1,000 QPS  →  50,000 QPS", 26, ACCENT, True, 16),
-    ("當大型客戶上線，", 19, INK, True, 4),
-    ("流量瞬間暴增 50 倍，", 19, INK, True, 4),
-    ("這個架構哪會先崩潰？", 19, INK, True),
-])
-# 右：主題 bullets
-bullets(s, Inches(7.0), Inches(2.25), Inches(5.8), Inches(2.4), [
-    "流量暴增 Scenario 推演（Server vs DB vs Network）",
-    "Event-Driven Analytics Pipeline 架構",
-    "System Design 面試實戰答題框架",
-], size=16, gap=14)
-# 右下：課前準備
-prep = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(7.0), Inches(4.75), Inches(5.8), Inches(1.15))
-prep.fill.solid(); prep.fill.fore_color.rgb = LIGHT; prep.line.color.rgb = LIGHT; prep.shadow.inherit = False
-pbar = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(7.0), Inches(4.75), Inches(0.09), Inches(1.15))
-pbar.fill.solid(); pbar.fill.fore_color.rgb = GATEWAY; pbar.line.fill.background(); pbar.shadow.inherit = False
-textbox(s, Inches(7.3), Inches(4.95), Inches(5.3), Inches(0.9), [
-    ("課前準備", 15, INK, True, 6), ("複習教材 Deep Dive 章節", 14, MUTED, False)])
+header(s, "極限擴展 · 50× 推演", "1k → 50k QPS：這套架構哪裡先崩？")
+textbox(s, Inches(0.6), Inches(1.55), Inches(12), Inches(0.6), [
+    ("1,000 QPS  →  50,000 QPS（大型客戶上線,流量瞬間 50×）", 18, ACCENT, True)])
+brows = [
+    ("#", "元件", "為何崩（先 → 後）"),
+    ("1", "DB 寫入 (scan_events)", "每次 redirect 一筆 INSERT → 50k writes/s 打單一 RDS（單 AZ、無 replica）→ 最先爆"),
+    ("2", "EC2 ASG", "max_size=2 且無 scaling policy（固定 desired）→ 扛不住 50k 連線/CPU"),
+    ("3", "API Gateway", "stage rate=1000 + 帳號預設 ~10k RPS → 大量 429"),
+    ("4", "Redis 單節點", "cache.t4g.micro 50k GET/s 高 CPU/網路、無讀擴展"),
+    ("5", "Edge", "CloudFront/ALB 可擴(LCU 成本↑);但 redirect 不快取 → 全額回源放大下游"),
+]
+bt = s.shapes.add_table(len(brows), 3, Inches(0.6), Inches(2.3), Inches(12.15), Inches(3.4)).table
+bt.columns[0].width = Inches(0.7); bt.columns[1].width = Inches(3.3); bt.columns[2].width = Inches(8.15)
+REDBG = RGBColor(0xFE, 0xE2, 0xE2)
+for r in range(len(brows)):
+    for c in range(3):
+        cell = bt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        if r == 0:
+            cell.fill.fore_color.rgb = ACCENT
+        elif r == 1:
+            cell.fill.fore_color.rgb = REDBG  # 最先崩
+        else:
+            cell.fill.fore_color.rgb = WHITE if r % 2 else LIGHT
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = brows[r][c]
+        _font(run, 12, WHITE if r == 0 else INK, r == 0 or c <= 1)
+bullets(s, Inches(0.6), Inches(5.9), Inches(12.3), Inches(1.2), [
+    "結論：DB 的 scan 寫入最先崩——分析寫入沒和 redirect 解耦(唯一線性暴增又集中單點的寫入)。",
+], size=14, gap=4)
+
+# ============ Slide: Event-Driven Analytics Pipeline ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · ANALYTICS PIPELINE", "解法:緩衝 + 批次聚合（解 DB 寫入瓶頸）")
+box(s, Inches(0.5), Inches(2.1), Inches(2.1), Inches(0.9), "redirect\nput 1 event", CLIENT, WHITE, 12)
+box(s, Inches(3.0), Inches(2.1), Inches(2.7), Inches(0.9), "Kinesis / SQS\n高吞吐緩衝(吸尖峰)", ANALYTICS, WHITE, 11)
+box(s, Inches(6.1), Inches(2.1), Inches(2.7), Inches(0.9), "消費者\nLambda/KCL 批次聚合", APP, WHITE, 11)
+box(s, Inches(9.2), Inches(1.4), Inches(3.3), Inches(0.7), "每日計數 rollup\n(DynamoDB/RDS)", DB, WHITE, 10)
+box(s, Inches(9.2), Inches(2.25), Inches(3.3), Inches(0.7), "原始明細歸檔\n(S3 + Athena)", DB, WHITE, 10)
+box(s, Inches(9.2), Inches(3.1), Inches(3.3), Inches(0.7), "即時分析(選)\nOpenSearch", DB, WHITE, 10)
+arrow(s, Inches(2.6), Inches(2.55), Inches(3.0), Inches(2.55))
+arrow(s, Inches(5.7), Inches(2.55), Inches(6.1), Inches(2.55))
+arrow(s, Inches(8.8), Inches(2.55), Inches(9.2), Inches(1.75), color=MUTED, width=1.1)
+arrow(s, Inches(8.8), Inches(2.55), Inches(9.2), Inches(2.6), color=MUTED, width=1.1)
+arrow(s, Inches(8.8), Inches(2.55), Inches(9.2), Inches(3.45), color=MUTED, width=1.1)
+bullets(s, Inches(0.6), Inches(4.4), Inches(12.3), Inches(2.6), [
+    "redirect 只丟事件進 stream(極快、緩衝吸 50k/s 尖峰),不再每次同步寫 RDS → 寫入降到批次級(對應第 14 題)",
+    "ASG：target-tracking autoscaling + 提高 max(或 Fargate/Lambda)",
+    "讀路徑：Redis cluster/多節點 + 拉高熱門命中;RDS read replica 分攤 cache-miss 讀(第 16 題)",
+    "edge：熱門 token 用 CloudFront 短 TTL 邊緣 redirect(附錄 B)在邊緣消化大半流量;API GW 調高 throttle",
+], size=13, gap=8)
 
 prs.save("QR_Code_Generator.pptx")
 print("saved QR_Code_Generator.pptx ·", len(prs.slides._sldIdLst), "slides")

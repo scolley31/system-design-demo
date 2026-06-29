@@ -837,3 +837,41 @@ EventBridge Scheduler（每日 03:00 UTC,cron 可調）
 **驗證(本機)**:malformed JSON→422 字串、缺欄位→422、>64KB→413、`dimension=-5`→500 不洩漏 + 有 `X-Request-ID`、`REDIS_URL` 不可達時 redirect 仍 302(走 DB)。皆通過。
 
 **不在範圍**:重試/熔斷、結構化 JSON log、型別化錯誤碼。
+
+---
+
+## 附錄 J：極限擴展推演（1k → 50k QPS）+ Event-Driven Analytics
+
+情境:大型客戶上線,流量瞬間 **50×**。這套架構**哪裡先崩**?
+
+### 崩潰順序（先 → 後）
+
+| # | 元件 | 為何崩 |
+|---|---|---|
+| 🔴 1 | **DB 寫入(scan_events)** | **每次 redirect = 一筆 RDS INSERT** → 50k writes/s 打單一 `db.t4g.micro`(單 AZ、無 replica)。唯一隨流量線性暴增又集中單點的寫入 → **最先爆**(即使 BackgroundTasks 非同步,仍落同一 RDS) |
+| 🔴 2 | **EC2 ASG** | `max_size=2` 且**無 scaling policy**(固定 desired)→ 2 台 t4g.small 扛不住 50k 連線/CPU |
+| 🟠 3 | **API Gateway** | stage `rate=1000` + 帳號預設 ~10k RPS → 大量 **429**(設定型瓶頸) |
+| 🟠 4 | **Redis** | 單節點 `cache.t4g.micro`,50k GET/s 高 CPU/網路、無讀擴展 |
+| 🟢 5 | **Edge** | CloudFront/ALB 可擴(LCU 成本上升);但 redirect 不快取 → 全額回源放大下游 |
+
+**結論:DB 的 scan 寫入最先崩**——分析寫入沒和 redirect 解耦。
+
+### 解法:Event-Driven Analytics Pipeline
+
+```
+redirect → put 1 筆 event → Kinesis / SQS（高吞吐緩衝,毫秒級,吸 50k/s 尖峰）
+                                  │  消費者(Lambda/KCL)批次聚合
+        ┌─────────────────────────┼──────────────────────┐
+   每日計數預聚合              原始明細歸檔             即時分析(選)
+  DynamoDB / RDS rollup       S3 + Athena            OpenSearch
+```
+- redirect 只「丟事件進 stream」(極快、緩衝吸尖峰),**不再每次同步寫 RDS**。
+- 消費者**批次**寫入 → 下游寫入量從 5 萬/s 降到批次級。即 **第 14 題(獨立分析庫 + 預聚合)** 的 production 形態。
+
+### 搭配擴展修正
+- **ASG**:target-tracking scaling(CPU/RequestCountPerTarget)+ 提高 max;或 Fargate/Lambda。
+- **讀路徑**:Redis cluster/多節點 + 拉高熱門命中;RDS 加 **read replica**(第 16 題)分攤 cache-miss 讀。
+- **edge**:熱門 token 用 **CloudFront 短 TTL 邊緣 redirect**(附錄 B)在邊緣消化大半流量。
+- **API GW**:調高 throttle 額度。
+
+> 一句話:先崩的是 **DB 寫入**,用「緩衝 + 批次聚合」的 event-driven pipeline 解掉;其餘靠 ASG autoscaling + Redis/RDS 讀擴展 + edge 快取補齊。
