@@ -22,6 +22,10 @@ output "api_id" {
   value = aws_apigatewayv2_api.this.id
 }
 
+output "cloudfront_distribution_id" {
+  value = aws_cloudfront_distribution.this.id
+}
+
 output "integration_id" {
   value = aws_apigatewayv2_integration.alb.id
 }

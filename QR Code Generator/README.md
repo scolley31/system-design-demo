@@ -111,6 +111,8 @@ curl http://localhost:8000/api/v1/qr/{token}/analytics
 
 **Data cleanup cron**:**EventBridge Scheduler + Lambda**(每日)定時清掉過期 QR(`expires_at` 超過保留期)與軟刪超期列,連帶刪其 `scan_events`,避免 DB bloat。清理腳本 `infra/modules/cleanup/src/cleanup.py` 可本機對 SQLite 跑測試。詳見 DESIGN 附錄 G。
 
+**Monitoring / Alerting**:CloudWatch **alarms → SNS email**(ALB/RDS/ElastiCache/API GW/Lambda/CloudFront 關鍵指標)、app logs → **CloudWatch Logs**(`awslogs` driver)、**Dashboard**、**Synthetic canary** 每 5 分鐘探測 CloudFront `/health`。`alert_email` 為變數(訂閱需點確認信)。詳見 DESIGN 附錄 H。
+
 env（雲端由 EC2 容器注入，本機留空即走原型路徑）：`DATABASE_URL`、`REDIS_URL`、`S3_BUCKET`、`CDN_BASE`、`BASE_URL`。
 - `app/cache.py`：有 `REDIS_URL` → Redis，否則記憶體。
 - `app/storage.py`：有 `S3_BUCKET` → 上傳 S3 並回 CDN URL，否則 `/image` 即時生圖。

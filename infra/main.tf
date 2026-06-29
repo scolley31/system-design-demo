@@ -83,6 +83,26 @@ module "auth" {
   cloudfront_url = module.edge.cloudfront_url
 }
 
+module "monitoring" {
+  source = "./modules/monitoring"
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+  project                    = var.project
+  region                     = var.region
+  alert_email                = var.alert_email
+  alb_arn_suffix             = module.compute.alb_arn_suffix
+  tg_arn_suffix              = module.compute.tg_arn_suffix
+  asg_name                   = module.compute.asg_name
+  db_instance_id             = module.data.db_instance_id
+  redis_cluster_id           = module.data.redis_cluster_id
+  api_id                     = module.edge.api_id
+  lambda_name                = module.cleanup.lambda_name
+  cloudfront_distribution_id = module.edge.cloudfront_distribution_id
+  cloudfront_url             = module.edge.cloudfront_url
+}
+
 module "cleanup" {
   source                 = "./modules/cleanup"
   project                = var.project

@@ -672,7 +672,7 @@ grows = [
     ("Error handling", "驗證回 400，未全面", "全面驗證 · 結構化錯誤 · 不 crash"),
     ("Rate limiting", "✅ 已實作", "WAF per-IP + API GW 節流"),
     ("Auth & 多租戶", "✅ 已實作", "Cognito + JWT + owner_id 隔離"),
-    ("Monitoring / Alerting", "無", "metrics · 日誌 · 掛掉告警"),
+    ("Monitoring / Alerting", "✅ 已實作", "CloudWatch alarms→SNS + Logs + canary"),
     ("Data cleanup", "✅ 已實作", "EventBridge + Lambda 定時清理"),
     ("Caching / CDN", "記憶體 + 即時生圖", "Redis + object store + CDN"),
 ]
@@ -821,6 +821,38 @@ bullets(s, Inches(0.6), Inches(5.6), Inches(12.3), Inches(1.4), [
     "單一來源:cleanup.py(SQLAlchemy+text SQL)Lambda 與本機共用;Lambda 用純 Python pg8000 免二進位打包",
     "與 app 實例解耦(不用 app 內排程,免多實例重複跑/leader election);保留天數皆 Terraform 變數可調",
 ], size=13, gap=8)
+
+# ============ Slide: Monitoring / Alerting ============
+s = prs.slides.add_slide(BLANK)
+header(s, "可靠性 · MONITORING", "CloudWatch alarms → SNS + Logs + Dashboard + Canary")
+box(s, Inches(0.6), Inches(2.0), Inches(3.2), Inches(0.9), "CloudWatch Alarms\nALB/RDS/EC2/API GW/Lambda/CF", APP, WHITE, 11)
+box(s, Inches(4.3), Inches(2.0), Inches(2.6), Inches(0.9), "SNS topic\n→ Email 通知", ANALYTICS, WHITE, 12)
+box(s, Inches(7.4), Inches(2.0), Inches(2.6), Inches(0.9), "Synthetic Canary\n每 5 分 /health", DB, WHITE, 12)
+arrow(s, Inches(3.8), Inches(2.45), Inches(4.3), Inches(2.45))
+arrow(s, Inches(7.4), Inches(2.45), Inches(6.9), Inches(2.45), color=MUTED, width=1.2)  # canary→alarms
+mrows = [
+    ("面向", "內容"),
+    ("告警 alarms", "ALB unhealthy/5xx/latency · RDS CPU/storage · ElastiCache · API GW 5xx · Lambda errors · CloudFront 5xx(us-east-1)"),
+    ("通知", "CloudWatch alarm → SNS topic → email（alert_email,需點確認信）"),
+    ("App logs", "EC2 容器 awslogs driver → CloudWatch Logs /qrcode/app（retention 14d）"),
+    ("Dashboard", "qrcode-overview：ALB/RDS/EC2/API GW/Lambda 一頁"),
+    ("Canary", "syn-nodejs-puppeteer 每 5 分探測 CloudFront /health → 失敗即 alarm"),
+]
+mt = s.shapes.add_table(len(mrows), 2, Inches(0.6), Inches(3.3), Inches(12.15), Inches(2.9)).table
+mt.columns[0].width = Inches(2.2); mt.columns[1].width = Inches(9.95)
+for r in range(len(mrows)):
+    for c in range(2):
+        cell = mt.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = mrows[r][c]
+        _font(run, 12, WHITE if r == 0 else INK, r == 0 or c == 0)
+bullets(s, Inches(0.6), Inches(6.4), Inches(12.3), Inches(0.8), [
+    "解決『服務掛了沒人知道』;canary 是端到端外部探測(連 CloudFront/整鏈路掛掉都測得到)。純 infra,已 validate/plan 通過(未 apply)。",
+], size=12, gap=4)
 
 # ============ Slide: CI/CD Flow ============
 s = prs.slides.add_slide(BLANK)

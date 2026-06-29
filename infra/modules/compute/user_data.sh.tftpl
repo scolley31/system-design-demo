@@ -40,8 +40,18 @@ REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 docker pull "$IMAGE_URI"
 
+# Monitoring：app 日誌送 CloudWatch Logs（awslogs driver）
+LOG_GROUP="$PREFIX/app"
+TOKEN="$(curl -s -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' || echo '')"
+IID="$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || echo qrapp)"
+
 docker rm -f qrapp 2>/dev/null || true
 docker run -d --name qrapp --restart always -p 8000:8000 \
+  --log-driver=awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$LOG_GROUP" \
+  --log-opt awslogs-create-group=true \
+  --log-opt awslogs-stream="$IID" \
   -e DATABASE_URL="$DATABASE_URL" \
   -e REDIS_URL="$REDIS_URL" \
   -e S3_BUCKET="$S3_BUCKET" \

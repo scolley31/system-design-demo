@@ -10,4 +10,5 @@ crash.log
 # Lambda 打包產物（apply 時由 null_resource 產生）
 modules/cleanup/build/
 modules/cleanup/build.zip
+modules/monitoring/canary.zip
 # .terraform.lock.hcl 保留進版控（鎖定 provider 版本）

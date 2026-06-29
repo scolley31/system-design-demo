@@ -134,3 +134,9 @@ variable "cleanup_schedule" {
   type    = string
   default = "cron(0 3 * * ? *)" # 每日 03:00 UTC
 }
+
+# --- Monitoring / Alerting ---
+variable "alert_email" {
+  type    = string
+  default = "scolley31@gmail.com" # SNS 告警通知信箱（建立後需點確認信）
+}

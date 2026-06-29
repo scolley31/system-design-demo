@@ -640,11 +640,11 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 | Error handling | 驗證回 400，但未全面 | 全面輸入驗證、結構化錯誤回應、不因壞輸入 crash |
 | Rate limiting | ✅ **已實作**（WAF per-IP + API GW 整體節流） | 見附錄 E |
 | Auth & 多租戶 | ✅ **已實作**（Cognito + API GW JWT authorizer + owner_id 隔離） | 見附錄 F |
-| **Monitoring / Alerting** | **無** | metrics、結構化日誌、服務掛掉告警（動態 QR 的 server 是 SPOF） |
+| Monitoring / Alerting | ✅ **已實作**（CloudWatch alarms→SNS email + Logs + Dashboard + canary） | 見附錄 H |
 | Data cleanup | ✅ **已實作**（EventBridge + Lambda 定時清過期/軟刪超期） | 見附錄 G |
 | Caching / CDN | 記憶體 dict + 即時生圖 | Redis + object store + CDN（第 7/15 題） |
 
-**Rate limiting**(附錄 E)、**Auth/多租戶**(附錄 F)、**Data cleanup cron**(附錄 G)已實作;剩下 **monitoring/alerting**、**全面 error handling** 待補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
+**Rate limiting**(附錄 E)、**Auth/多租戶**(附錄 F)、**Data cleanup cron**(附錄 G)、**Monitoring/Alerting**(附錄 H)已實作;剩下 **全面 error handling**(輸入驗證/結構化錯誤回應)待補。注意：動態 QR 把 server 變成 single point of failure,所以 caching + CDN + monitoring 不是加分項而是**動態方案的必要代價**。
 
 > **靜態的反向場景**：若需求是「印好不改、離線可用、極高可靠（如醫療器材）」，反而該選**靜態 QR**（編碼原始 URL、不需 server）。我們選動態純粹因為需求是「可修改 + 可追蹤」。
 
@@ -783,3 +783,33 @@ EventBridge Scheduler（每日 03:00 UTC,cron 可調）
 **檔案**:`infra/modules/cleanup`(Lambda + EventBridge Scheduler + lambda SG→RDS ingress + IAM + 打包)、`src/cleanup.py`。已 `terraform validate`/`plan` 通過(未 apply)。
 
 **不在範圍**:scan_events 通用時間修剪、長期未點擊 email 通知(SES)、冷儲存歸檔。
+
+---
+
+## 附錄 H：Monitoring / Alerting（已實作）
+
+目標:解決「服務掛了沒人知道」。四個面向:
+
+**① 告警**:CloudWatch alarms → **SNS topic → email**(`alert_email` 變數,訂閱需點確認信)。涵蓋:
+| 來源 | 指標 / 條件 |
+|---|---|
+| ALB | UnHealthyHostCount≥1、Target 5xx>5/5分、TargetResponseTime>1s |
+| EC2 ASG | CPU>80% |
+| RDS | CPU>80%、FreeStorageSpace<2GB |
+| ElastiCache | CPU>80% |
+| API Gateway | 5xx>5/5分 |
+| Lambda(cleanup) | Errors≥1 |
+| CloudFront | 5xxErrorRate>5%(**alarm 建在 us-east-1**) |
+| Canary | SuccessPercent<90 |
+
+**② App logs → CloudWatch Logs**:EC2 容器改用 `awslogs` driver → log group `/qrcode/app`(retention 14 天);EC2 role 加 logs 權限。不再只在本機 `docker logs`。
+
+**③ Dashboard**:`qrcode-overview`——ALB / RDS / API GW / EC2 / Lambda 關鍵指標一頁。
+
+**④ Synthetic canary**:`syn-nodejs-puppeteer` 每 5 分鐘 GET CloudFront `/health`,非 200 即失敗 → alarm → SNS(端到端外部探測,連 CloudFront/整條鏈路掛掉都測得到)。
+
+**檔案**:`infra/modules/monitoring`(SNS/alarms/log group/dashboard/canary + role + artifact bucket + heartbeat 腳本);compute(awslogs + logs IAM);各 module 補 `arn_suffix`/id 輸出。已 `terraform validate`/`plan` 通過(105 資源,未 apply)。
+
+**成本**:alarms ~$0.10/個/月、Logs 量小、**canary 每次執行計費**(每 5 分鐘,數美元/月級距,可調頻率)。
+
+**不在範圍**:Slack/PagerDuty、X-Ray 追蹤、log-based metric filters、自訂業務指標(EMF)。

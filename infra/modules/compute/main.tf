@@ -65,6 +65,15 @@ resource "aws_iam_role_policy" "app_config" {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = var.db_secret_arn
+      },
+      {
+        # Monitoring：容器用 awslogs driver 送 CloudWatch Logs
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = [
+          "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/${var.project}/*",
+          "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/${var.project}/*:*",
+        ]
       }
     ]
   })

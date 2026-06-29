@@ -76,6 +76,14 @@ output "cleanup_schedule_name" {
   value = module.cleanup.schedule_name
 }
 
+output "alerts_sns_topic_arn" {
+  value = module.monitoring.sns_topic_arn
+}
+
+output "dashboard_name" {
+  value = module.monitoring.dashboard_name
+}
+
 output "gha_deploy_role_arn" {
   description = "GitHub Actions OIDC 用的 role ARN（填進 workflow / repo variable）"
   value       = module.cicd.deploy_role_arn
