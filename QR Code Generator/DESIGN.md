@@ -888,7 +888,19 @@ EventBridge Scheduler（每日 03:00 UTC,cron 可調）
 
 情境:大型客戶上線,流量瞬間 **50×**。這套架構**哪裡先崩**?
 
-### 崩潰順序（先 → 後）
+### Step 1：瓶頸在哪？（DB 先爆還是 Server 先爆？）
+
+先在三個候選之間定位——教材估算 ~5,800 QPS redirect，現在要 50K → **約 10 倍**。
+
+| 候選 | 分析 | 是瓶頸? |
+|---|---|---|
+| **API Server** | redirect handler 邏輯簡單（查 token → 回 302），CPU 不是瓶頸，stateless 水平擴展容易 | ❌ |
+| **Database** | **每次 redirect 都是一次 DB read**；50K QPS read → 大多數單機 DB 扛不住 | ✅ **第一個瓶頸** |
+| **Network** | 302 response 很小（只有 Location header），頻寬不是問題 | ❌ |
+
+**結論:DB 是第一個瓶頸,解法方向是「在 DB 前面擋一層 Cache」。** 這正是第 7 題 Redis 的作用——cache 吸掉大多數 read。**但讀側被 cache 解掉後,下一個先崩的就換成「寫側」**:每次 redirect 仍要寫一筆 `scan_events`(分析明細),這條寫入無法被讀 cache 擋掉 → 見下方崩潰順序。
+
+### 崩潰順序（先 → 後，讀側已有 cache 的前提下）
 
 | # | 元件 | 為何崩 |
 |---|---|---|

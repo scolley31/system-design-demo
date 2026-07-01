@@ -1094,6 +1094,36 @@ for i, (title, desc, accent) in enumerate(gap_cards):
     textbox(s, x + Inches(0.3), y + Inches(0.2), cw - Inches(0.5), ch - Inches(0.3),
             [(title, 16, INK, True, 8), (desc, 13, MUTED, False)])
 
+# ============ Slide: 極限擴展 Step 1 — 瓶頸在哪 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · STEP 1", "瓶頸在哪？—— DB 先爆還是 Server 先爆？")
+AMBER = RGBColor(0xF5, 0x9E, 0x0B)
+cards = [
+    ("API Server", ["Redirect handler 邏輯簡單（查 token → 回 302）", "CPU 不是瓶頸，水平擴展容易"], AMBER),
+    ("Database", ["每次 redirect 都是一次 DB read", "50K QPS read → 大多數單機 DB 扛不住"], RED),
+    ("Network", ["302 response 很小（只有 Location header）", "頻寬不是問題"], INK),
+]
+cy = Inches(1.75)
+for title, lines, strip in cards:
+    h = Inches(1.45)
+    st = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.6), cy, Inches(0.12), h)
+    st.fill.solid(); st.fill.fore_color.rgb = strip; st.line.fill.background(); st.shadow.inherit = False
+    bg = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.72), cy, Inches(6.5), h)
+    bg.fill.solid(); bg.fill.fore_color.rgb = LIGHT; bg.line.fill.background(); bg.shadow.inherit = False
+    textbox(s, Inches(0.95), cy + Inches(0.12), Inches(6.1), h - Inches(0.2),
+            [(title, 16, INK, True, 6)] + [(ln, 12.5, MUTED, False, 3) for ln in lines])
+    cy += h + Inches(0.2)
+concl = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(7.6), Inches(2.1), Inches(5.15), Inches(2.9))
+concl.fill.solid(); concl.fill.fore_color.rgb = RGBColor(0xEF, 0xF6, 0xFF); concl.line.color.rgb = ACCENT
+concl.line.width = Pt(1.5); concl.shadow.inherit = False
+textbox(s, Inches(7.9), Inches(2.4), Inches(4.6), Inches(2.4), [
+    ("結論：DB 是第一個瓶頸", 18, ACCENT, True, 10),
+    ("教材估算 ~5,800 QPS redirect", 13, MUTED, False, 4),
+    ("現在要 50K → 約 10 倍", 13, INK, True, 12),
+    ("解法方向：在 DB 前面擋一層 Cache", 14, INK, True)])
+textbox(s, Inches(0.6), Inches(6.75), Inches(12.2), Inches(0.6), [
+    ("讀側:cache 擋掉大多數 DB read（第 7 題 Redis 就是這層）→ 接著換「寫側(分析 scan_events)」變成下一個瓶頸(下頁)。", 12, MUTED, False)])
+
 # ============ Slide: 極限擴展 — 50x 推演 ============
 s = prs.slides.add_slide(BLANK)
 header(s, "極限擴展 · 50× 推演", "1k → 50k QPS：這套架構哪裡先崩？")
