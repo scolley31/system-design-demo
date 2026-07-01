@@ -834,9 +834,37 @@ textbox(s, Inches(0.5), Inches(5.7), Inches(12.3), Inches(1.4), [
     ("WAF(per-IP rate limit)掛在 CloudFront 邊緣;/qr-img/* → S3 長快取;/, /r/*, /api/* → API Gateway,redirect 不快取。", 13, INK, False, 4),
     ("設定/密鑰:SSM Parameter Store(DATABASE_URL/REDIS_URL/S3_BUCKET/CDN_BASE/BASE_URL/IMAGE_URI)·Secrets Manager(DB 密碼)·ECR·NAT Gateway。", 12, MUTED, False)])
 
+# ============ Slide: Rate Limiting — two layers ============
+s = prs.slides.add_slide(BLANK)
+header(s, "安全 · RATE LIMITING", "兩層限流 — Application Layer vs Infrastructure Layer")
+textbox(s, Inches(0.6), Inches(1.4), Inches(12.2), Inches(0.55), [
+    ("情境:有人用 script 一秒打你 10 萬次,怎麼擋?兩層各有所長,production 通常縱深並用。", 13, INK, False, 2)])
+rlcmp = [
+    ("維度", "Application Layer", "Infrastructure Layer"),
+    ("常見手段", "token bucket / sliding window、per-API-key quota、回 429", "CDN + WAF（擋 L3–L7 DDoS）、LB connection limit、API Gateway throttling"),
+    ("跑在哪", "你的 server code（middleware、sidecar）", "CDN edge、WAF、LB、API Gateway"),
+    ("看得到的資訊", "業務 context（user ID、訂閱 tier、資源所有權、業務狀態）", "HTTP 通用內容（IP、headers、URL、body bytes），不解業務語意"),
+    ("拒絕成本", "高（已花 TCP+TLS+server CPU）", "低（在 edge 丟掉，不耗 origin）"),
+    ("粒度", "細（per user、per endpoint、per resource）", "粗（per IP、per region、per connection）"),
+]
+ct = s.shapes.add_table(len(rlcmp), 3, Inches(0.6), Inches(2.05), Inches(12.15), Inches(3.9)).table
+ct.columns[0].width = Inches(2.1); ct.columns[1].width = Inches(5.0); ct.columns[2].width = Inches(5.05)
+for r in range(len(rlcmp)):
+    for c in range(3):
+        cell = ct.cell(r, c)
+        cell.margin_top = Pt(3); cell.margin_bottom = Pt(3); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = rlcmp[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+box(s, Inches(0.6), Inches(6.15), Inches(12.15), Inches(1.0),
+    "本專案目前只做 Infrastructure Layer（WAF per-IP + API GW 節流）—— 擋匿名洪水最划算;per-user/tier 的業務限流（App Layer）列為後續", GATEWAY, WHITE, 13)
+
 # ============ Slide: Rate Limiting ============
 s = prs.slides.add_slide(BLANK)
-header(s, "安全 · RATE LIMITING", "防灌爆：WAF per-IP + API Gateway 節流（縱深）")
+header(s, "安全 · RATE LIMITING", "本專案實作：WAF per-IP + API Gateway 節流（Infra 層縱深）")
 box(s, Inches(0.5), Inches(2.0), Inches(1.8), Inches(0.9), "掃描者 / Script", CLIENT, WHITE, 12)
 box(s, Inches(2.65), Inches(2.0), Inches(2.5), Inches(0.9), "WAF (per-IP)\n超量 → 403", RED, WHITE, 12)
 box(s, Inches(5.55), Inches(2.0), Inches(1.9), Inches(0.9), "CloudFront", CDN, WHITE, 12)
