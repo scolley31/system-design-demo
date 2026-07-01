@@ -504,6 +504,28 @@ right = [
 bullets(s, Inches(0.7), Inches(1.9), Inches(6.0), Inches(5), left, size=14, gap=8)
 bullets(s, Inches(6.9), Inches(1.9), Inches(6.0), Inches(5), right, size=14, gap=8)
 
+# ============ Slide 09b: Cache write strategy ============
+s = prs.slides.add_slide(BLANK)
+header(s, "09b · DEEP DIVE", "Cache 寫策略 — 讀 cache-aside，寫 write-around")
+rows = [
+    ("redirect 讀", "miss → 查 DB → 回填", "cache-aside", DB),
+    ("create", "寫 DB → 順手 set（暖）", "write-through（小優化）", APP),
+    ("update / delete", "寫 DB →（commit 後）delete", "write-around / invalidate", CACHE),
+]
+ry = Inches(1.95)
+for op, act, mode, color in rows:
+    box(s, Inches(0.7), ry, Inches(2.5), Inches(0.7), op, color, WHITE, 13)
+    box(s, Inches(3.35), ry, Inches(4.5), Inches(0.7), act, WHITE, INK, 12, bold=False)
+    box(s, Inches(8.0), ry, Inches(4.6), Inches(0.7), mode, WHITE, color, 12)
+    ry += Inches(0.9)
+bullets(s, Inches(0.7), Inches(4.9), Inches(11.9), Inches(2.3), [
+    "為何寫時 invalidate 而非 write-through：",
+    ("read-heavy 且非每筆會被讀 → write-through 白佔記憶體、擠掉熱門 token；write-around 只快取真正被讀的工作集", 1),
+    ("一致性更單純：update 直接刪 cache、下次讀從 DB 重建；順序 commit → 再 invalidate，避免 stale 回填 race", 1),
+    ("TTL 兜底最終一致；scan 分析寫入是非同步、不進此 cache（附錄 J）", 1),
+    "何時反選 write-through：寫完馬上一定會讀（read-your-write 高頻，如 session）；redirect 建立與被掃無強時間關聯 → write-around 勝",
+], size=13, gap=7)
+
 # ============ Slide 10: Reliability / data ============
 s = prs.slides.add_slide(BLANK)
 header(s, "10 · DEEP DIVE", "決策 3 — 可靠性與資料語意")

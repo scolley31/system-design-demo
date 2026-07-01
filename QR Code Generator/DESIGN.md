@@ -243,6 +243,21 @@ CREATE INDEX idx_token_scanned ON scan_events (token, scanned_at);  -- 分析複
 
 **定案**：Redis。原型可暫用 dict 並註明替換點。
 
+**寫策略：cache-aside 讀 + write-around（invalidate）寫**
+
+| 操作 | 對 cache | 模式 |
+|---|---|---|
+| redirect 讀 | miss → 查 DB → 回填 | cache-aside |
+| create | 寫 DB → 順手 set（暖） | write-through（僅 create,小優化） |
+| update / delete | 寫 DB → **delete**（失效,非寫新值） | **write-around / invalidate** |
+
+為何寫時 **invalidate 而非 write-through**:
+- **read-heavy 且不是每筆都會被讀**:write-through 每次寫都塞 cache,但很多 QR 從沒被掃 → 白佔記憶體、擠掉熱門 token。write-around 只快取「真正被讀到」的工作集 → 記憶體效率/命中率更好。
+- **一致性更單純**:update 直接刪 cache、讓下次讀從 DB 重建,避免 write-through 更新值的並發互蓋與「先寫 cache 或 DB」的 stale 回填 race(順序:commit → 再 invalidate)。
+- **TTL 兜底**:漏 invalidate 時 stale 上限一個 TTL。
+
+何時反而選 write-through:寫完馬上一定會讀(read-your-write 高頻,如 session)。redirect 的「建立」與「被掃」無強時間關聯、讀遠多於寫 → write-around 勝。（scan 分析寫入是非同步、不進此 cache,見附錄 J。）
+
 ## 第 8 題：Scan 寫入（同步 vs 非同步）
 
 **這題在處理什麼**：每次掃 QR 打到 `/r/{token}` 時，我們要做兩件事——①記一筆掃描紀錄（給分析用）②回 302 跳轉。「Scan 寫入」指第①件。問題是：紀錄要**卡在使用者面前寫完**（同步），還是**先放使用者走、背景再補**（非同步）？核心判斷：跳轉不能等、記帳可以慢，所以把「可容忍延遲的分析」從「不可容忍延遲的跳轉」路徑上搬走。
