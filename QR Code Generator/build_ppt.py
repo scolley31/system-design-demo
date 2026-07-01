@@ -1182,6 +1182,41 @@ box(s, Inches(0.6), Inches(5.2), Inches(12.15), Inches(0.95),
 textbox(s, Inches(0.6), Inches(6.3), Inches(12.2), Inches(0.7), [
     ("⚠ 雙層必要性看「規模 + 地理」:Local-only + 小流量 → 單層 Redis 也夠;跨區域 / >100K QPS → 雙層必要。本專案落點:第 7 題 Redis（單層）+ 附錄 B CDN 邊緣變體（選配升級到雙層）。", 12, MUTED, False, 2)])
 
+# ============ Slide: Step 2b — Near Cache (Local + Redis) ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · STEP 2", "Near Cache（Local + Redis 兩層）何時用？")
+textbox(s, Inches(0.6), Inches(1.45), Inches(12.2), Inches(0.5), [
+    ("核心動機:省掉「連 Redis 的那一跳」（同機房 ~0.5ms round-trip）。讀路徑加一層 L1:", 13, INK, False)])
+for i, (t, c) in enumerate([("L1 local\n行程內 ~奈秒", CACHE), ("L2 Redis\n~0.5ms", GATEWAY), ("DB\ncache miss", DB)]):
+    x = Inches(1.4) + i * Inches(3.6)
+    box(s, x, Inches(2.05), Inches(2.9), Inches(0.9), t, c, WHITE, 12)
+    if i < 2:
+        arrow(s, x + Inches(2.9), Inches(2.5), x + Inches(3.6), Inches(2.5))
+textbox(s, Inches(4.35), Inches(2.2), Inches(0.6), Inches(0.4), [("miss", 10, MUTED, False)])
+textbox(s, Inches(7.95), Inches(2.2), Inches(0.6), Inches(0.4), [("miss", 10, MUTED, False)])
+nrows = [
+    ("值得加 L1 的情況", "為什麼要 L1"),
+    ("極端熱點 key（hot key）", "少數 token 佔絕大多數流量（活動 QR 正是此型）→ L1 直接回、完全不碰 Redis"),
+    ("單一 Redis 頻寬/CPU 快到頂", "50K+ QPS 打單節點會先飽和（附錄 J #4）→ L1 擋多數、替 Redis 卸流量"),
+    ("要壓 p99 尾延遲", "Redis 偶發慢查詢/GC/網路抖動拉高 p99；L1 命中不受影響"),
+]
+nt = s.shapes.add_table(len(nrows), 2, Inches(0.6), Inches(3.2), Inches(12.15), Inches(2.0)).table
+nt.columns[0].width = Inches(4.0); nt.columns[1].width = Inches(8.15)
+for r in range(len(nrows)):
+    for c in range(2):
+        cell = nt.cell(r, c)
+        cell.margin_top = Pt(3); cell.margin_bottom = Pt(3); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = nrows[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+box(s, Inches(0.6), Inches(5.45), Inches(12.15), Inches(0.85),
+    "代價:L1 每台各一份 → 一致性變差（update 已在 Redis 失效,各台 L1 仍舊值）。解法:很短 L1 TTL（1–5s）或 pub/sub 廣播失效（keyspace notification）", RED, WHITE, 12)
+textbox(s, Inches(0.6), Inches(6.4), Inches(12.2), Inches(0.6), [
+    ("判斷:單層 Redis 已是瓶頸 + 流量集中 hot key + 能接受幾秒弱一致 → 才加 L1。兩種雙層:CDN+Redis（L1 放邊緣）vs Local+Redis（L1 放 app 行程內）。", 12, MUTED, False, 2)])
+
 # ============ Slide: Step 3 — CDN TTL 兩難 ============
 s = prs.slides.add_slide(BLANK)
 header(s, "極限擴展 · STEP 3", "CDN 的 TTL 兩難 + Analytics 缺口")
