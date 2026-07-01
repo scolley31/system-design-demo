@@ -243,6 +243,18 @@ CREATE INDEX idx_token_scanned ON scan_events (token, scanned_at);  -- 分析複
 
 **定案**：Redis。原型可暫用 dict 並註明替換點。
 
+**什麼情況才加「兩層 local+Redis」（L1 local + L2 Redis，即 near cache）**：核心動機是**省掉「連 Redis 的那一跳」**（同機房 ~0.5ms round-trip）。讀路徑變成 `L1 行程內（~奈秒）→ miss → L2 Redis（~0.5ms）→ miss → DB`。值得加的情況：
+
+| 情況 | 為什麼要 L1 |
+|---|---|
+| **極端熱點 key（hot key）** | 少數 token 佔絕大多數流量（活動 QR 正是此型）→ 放 L1 直接行程內回、**完全不碰 Redis**，延遲降到奈秒級 |
+| **單一 Redis 頻寬/CPU 快到頂** | 50K+ QPS 全打單節點會先飽和（附錄 J 崩潰順序 #4）→ L1 擋掉多數、**替 Redis 卸流量** |
+| **要壓 p99 尾延遲** | Redis 偶發慢查詢/GC/網路抖動會拉高 p99；L1 命中不受其影響 |
+
+代價（就是為什麼原型不用）：**L1 每台各一份 → 一致性變差**。update/delete 在 Redis 全域失效了，但各台 L1 仍是舊值，要等 L1 TTL 過期才一致（「A 台已更新、B 台還舊」的窗口）。這與「記憶體 dict」列的 bug 同源，只是兩層架構用 **很短的 L1 TTL（如 1–5s，接受短暫 stale）** 或 **pub/sub 廣播失效（Redis keyspace notification → 各台清 L1）** 把它控制住，且 Redis 仍是權威層。
+
+> 判斷：**單層 Redis 已是瓶頸 + 流量高度集中於少數 hot key + 能接受幾秒弱一致** → 才加 L1；否則單層 Redis 更簡單、一致性更好。這是繼「CDN + Redis 雙層」（附錄 J）之後的**另一條卸流量路**——兩者都是雙層，差別在 L1 放「邊緣 CDN」還是「app 行程內」。
+
 **四種 Cache 策略總覽**（心法：cache 本質是 replication，看兩件事決定策略——① 誰是 master ② 複製同步或非同步）：
 
 | 策略 | 讀 | 寫 | master / 複製 | 優 | 劣 | 適用 |
