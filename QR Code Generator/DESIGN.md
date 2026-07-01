@@ -900,6 +900,55 @@ EventBridge Scheduler（每日 03:00 UTC,cron 可調）
 
 **結論:DB 是第一個瓶頸,解法方向是「在 DB 前面擋一層 Cache」。** 這正是第 7 題 Redis 的作用——cache 吸掉大多數 read。**但讀側被 cache 解掉後,下一個先崩的就換成「寫側」**:每次 redirect 仍要寫一筆 `scan_events`(分析明細),這條寫入無法被讀 cache 擋掉 → 見下方崩潰順序。
 
+### Step 2：加 Cache 能解多少？（量化）
+
+50K redirect QPS 全打 DB 撐不住;cache 擋掉 hit 的部分,DB 只收 miss。不同 hit rate 下 DB 實際承受:
+
+| Cache Hit Rate | DB 實際 QPS | 能撐嗎? |
+|---|---|---|
+| 0%（沒 cache） | 50,000 | 完全撐不住 |
+| 90% | 5,000 | 勉強 |
+| 95% | 2,500 | 可以 |
+| 99% | 500 | 輕鬆 |
+
+**活動 QR Code 特性**:活動（門市促銷、演唱會入場）印在海報上的 QR **數量少（可能就幾十個）但每個 QPS 極高** → cache hit rate 可能 **99%+** → DB 只收 ~500 QPS,完全可以。這種「極端集中的熱點」天生適合 cache——這也是為什麼「量化 hit rate」比只說「加 cache」更有說服力（面試加分點）。
+
+**Cache 選型（Local / Redis / CDN 三層）**:
+
+| 維度 | Local Cache | Redis / Memcached | CDN Edge Cache |
+|---|---|---|---|
+| 延遲 | 最低（in-process） | 中（network hop） | 最低（離用戶近） |
+| 一致性 | 差（每台各一份） | 好（共享） | 差（purge 慢） |
+| Hit Rate | 無 sticky routing 則低 | 高（共享） | 依流量集中度 |
+| 容量 | 受限 server 記憶體 | 獨立擴展 | 依 CDN 供應商 |
+| 適用 | 極熱 key、不常變 | 通用 | 靜態或少變內容 |
+
+**Redis + CDN 雙層**:CDN 擋第一層（離用戶近、減 origin 流量）· Redis 擋第二層（CDN miss 不直接打 DB）· DB 只處理 cold start / miss。⚠ **雙層必要性看「規模 + 地理」**:Local-only + 小流量 → 單層 Redis 也夠;跨區域 / >100K QPS → 雙層必要。本專案落點:第 7 題 Redis（單層）+ 附錄 B CDN 邊緣變體（選配升級雙層）。
+
+### Step 3：CDN 的 TTL 兩難
+
+CDN cache 的 TTL 怎麼設?兩難:
+
+- **TTL 太長（例 24h）**:URL 改了 CDN 在 TTL 內不更新 → 用戶還被導到舊目標頁;無法即時停用被濫用的 short link。
+- **TTL 太短（例 10s）**:CDN 幾乎等於沒 cache → 大量流量穿透 origin,失去擋流量意義。
+
+**解法:合理 TTL + 主動 invalidation**
+- **主動 purge**:URL 改時呼叫 CDN purge API（Cloudflare 秒級 / CloudFront 分鐘級）。
+- **SWR（stale-while-revalidate）**:`max-age=300, stale-while-revalidate=60` → 0–300s 直接回 cache;300–360s 回舊值 + 背景拉新（用戶 0 等待）;360s+ 同步回源。
+
+⚠ **CDN 的副作用:analytics 缺口** —— CDN 命中時 request **不打到 API Server** → 這部分流量永遠不 emit analytics event → Analytics Pipeline 需額外手段補（CDN logs / edge function / 取樣）。這是「redirect 不快取以保分析完整」（第 6 題）與「快取以擋流量」的根本張力,附錄 B 用短 TTL + 只快取熱門 token 折衷。
+
+### Step 4：Token 生成也要 50K QPS 嗎？
+
+creation flow 會被打爆嗎?比較兩案:
+
+| 方案 | 優 | 劣 |
+|---|---|---|
+| **Hash-Based（教材/本專案）** | SHA-256 是 stateless 運算、CPU bound → 水平擴展就行、加機器=線性加產能、運維複雜度低 | 理論碰撞需 insert-retry（第 2 題已處理） |
+| Pre-generated Pool | 寫入時直接分配 → 零 collision | pool 會耗盡 → 需背景 job 持續補充、運維複雜度高 |
+
+**判斷:活動場景 creation QPS 遠低於 redirect QPS（建一次、掃千萬次）→ Hash-based 足夠**,不需 pre-generated pool 的額外複雜度。token 生成不是這個 scenario 的瓶頸——瓶頸在 redirect 讀路徑（Step 1–3）。
+
 ### 崩潰順序（先 → 後，讀側已有 cache 的前提下）
 
 | # | 元件 | 為何崩 |
@@ -931,3 +980,82 @@ redirect → put 1 筆 event → Kinesis / SQS（高吞吐緩衝,毫秒級,吸 5
 - **API GW**:調高 throttle 額度。
 
 > 一句話:先崩的是 **DB 寫入**,用「緩衝 + 批次聚合」的 event-driven pipeline 解掉;其餘靠 ASG autoscaling + Redis/RDS 讀擴展 + edge 快取補齊。
+
+---
+
+## 附錄 K：Analytics 深入（記錄什麼 · Store 選型 · 即時 vs 批次）
+
+第 8 題決定了「掃描寫入非同步」,這裡展開分析側的完整設計。
+
+### 記錄什麼？（Who / When / Where / What）
+
+| 面向 | 欄位 |
+|---|---|
+| **Who** | IP、User-Agent、裝置類型 |
+| **When** | 掃描時間、時區 |
+| **Where** | Referer、GeoIP、來源頁面 |
+| **What** | 哪個 QR Code（token）、目標 URL |
+
+**關鍵追問**:這些資料若寫在 redirect 的 critical path 上 → 50K QPS 下每次多一個 DB write → DB 直接爆。所以拆**兩條路徑、兩種 SLA**:
+
+- **Redirect path**:延遲敏感,要快 → **Cache + DB**（<100ms）。
+- **Analytics path**:量大但可延遲,要穩 → **Queue + Batch**（可容忍秒/分鐘級延遲、少量遺失）。
+
+同步 vs 非同步(對照第 8 題):同步寫（`DB read → DB write log → 302`）讓 redirect 變慢、DB write 進 critical path;非同步（`DB read → emit event → 302`,consumer 另寫 analytics store）則 redirect latency 不受影響。
+
+### Analytics Store 選型
+
+記錄下來後存哪、怎麼查,取決於**查詢模式**:
+
+| | OLTP (PostgreSQL) | Time-Series (TimescaleDB) | OLAP 自架 (ClickHouse) | OLAP serverless (Athena/BigQuery) |
+|---|---|---|---|---|
+| 寫入 | 簡單 | 優化過 | 極快（batch） | 便宜 |
+| 趨勢查詢 | 慢 | 快（時間分區） | 極快（columnar 聚合） | 中 |
+| 單筆查詢 | 快（索引） | 中 | 中 | 慢 |
+| 成本 | 高 | 中 | 中 | 最低 |
+| 適合 | 小規模 | 中規模+即時 | 大規模+即時 | 大規模+報表 |
+
+**選型準則**:即時 dashboard + 時間序列 → **TimescaleDB**;即時 + 複雜聚合 → **ClickHouse** 自架;每日/每週報表 + 不想維運 → **Athena / BigQuery** 最划算。本專案附錄 J 落點:**S3 + Athena 歸檔明細 + RDS/DynamoDB 預聚合每日計數**。
+
+### 即時 dashboard vs 每日報表（架構不同）
+
+| | 即時 Dashboard | 每日報表 |
+|---|---|---|
+| 管線 | Kafka → Flink/Spark Streaming → TimescaleDB → Dashboard | SQS → Consumer → S3 → Daily Batch Job → Report |
+| 延遲 | < 秒級（streaming） | 小時級（batch） |
+| 複雜度/成本 | 高 | 低（簡單便宜） |
+
+**先問需求再選架構**:大部分 QR Code 服務「**每日報表就夠了**」→ 不要過度設計。需要秒級即時才上 Kafka+Flink;否則 SQS + S3 + 每日 batch 最省。
+
+---
+
+## 附錄 L：面試答題框架（Design a QR Code Generator）
+
+把這套設計對映到 45 分鐘系統設計面試的節奏。
+
+### 時間分配
+
+| 時段 | 做什麼 |
+|---|---|
+| **0–5 min 需求釐清** | 靜態 or 動態？需要 analytics 嗎？預期 QPS？→ **問對問題 = 第一個加分點** |
+| **5–15 min High-Level Design** | 流暢畫完 Creation flow + Retrieval flow（教材主體） |
+| **15–35 min Deep Dive** | 面試官挑 1–2 追問:Token collision（第 2 題）｜流量暴增（附錄 J）｜Analytics（附錄 K） |
+| **35–45 min 收尾** | 總結 trade-off + 反問面試官問題 |
+
+### 常見扣分點
+
+- **需求沒問就開始畫圖**:靜態 vs 動態沒確認直接假設 → 質疑溝通能力。
+- **只講 Happy Path**:沒考慮 failure case（cache miss、DB 掛、token collision）→ 缺工程深度。
+- **Deep Dive 太淺**:每個都講一點但都不深 → 不如挑一個講透,展示「往下鑽」。
+- **沒有量化分析**:只說「加 cache 就好」但不算 hit rate、不算 DB 負載 → 缺說服力（見附錄 J Step 2 的量化表）。
+
+### 現場練習：「Cache hit rate 掉到 50%，你怎麼辦？」
+
+**先診斷再對策**（不要一律「加機器」）:
+
+| 診斷方向 | 應對策略 |
+|---|---|
+| Working set > cache size（QR 數量暴增） | 加大 Redis 記憶體 / Redis Cluster 分片 |
+| TTL 設太短 → 頻繁過期 miss | 延長 TTL / stale-while-revalidate |
+| Eviction policy 不對（LRU vs LFU） | 有 hot key → 換 LFU（Redis 4.0+） |
+| Bot 掃冷門 token → cache penetration | Negative caching:404 也 cache（短 TTL） |

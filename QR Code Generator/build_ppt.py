@@ -1124,6 +1124,96 @@ textbox(s, Inches(7.9), Inches(2.4), Inches(4.6), Inches(2.4), [
 textbox(s, Inches(0.6), Inches(6.75), Inches(12.2), Inches(0.6), [
     ("讀側:cache 擋掉大多數 DB read（第 7 題 Redis 就是這層）→ 接著換「寫側(分析 scan_events)」變成下一個瓶頸(下頁)。", 12, MUTED, False)])
 
+# ============ Slide: Step 2 — Cache hit rate math ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · STEP 2", "加 Cache 能解多少？—— 不同 hit rate 下 DB 承受量")
+textbox(s, Inches(0.6), Inches(1.5), Inches(12), Inches(0.5), [
+    ("50K redirect QPS 全打 DB → 撐不住;cache 擋掉 hit 的部分,DB 只收 miss。", 13, INK, False)])
+hrows = [
+    ("Cache Hit Rate", "DB 實際 QPS", "能撐嗎？"),
+    ("0%（沒 cache）", "50,000", "完全撐不住"),
+    ("90%", "5,000", "勉強"),
+    ("95%", "2,500", "可以"),
+    ("99%", "500", "輕鬆"),
+]
+ht = s.shapes.add_table(len(hrows), 3, Inches(1.2), Inches(2.15), Inches(11.0), Inches(2.7)).table
+ht.columns[0].width = Inches(4.0); ht.columns[1].width = Inches(3.5); ht.columns[2].width = Inches(3.5)
+hcolor = [None, RED, ANALYTICS, ACCENT, GREEN]
+for r in range(len(hrows)):
+    for c in range(3):
+        cell = ht.cell(r, c)
+        cell.margin_top = Pt(4); cell.margin_bottom = Pt(4); cell.margin_left = Pt(10)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = hrows[r][c]
+        col = WHITE if r == 0 else (hcolor[r] if c == 2 else INK)
+        _font(run, 14, col, r == 0 or c == 2)
+box(s, Inches(0.6), Inches(5.15), Inches(12.15), Inches(1.55),
+    "活動 QR Code 特性:數量少（可能就幾十個）但每個 QPS 極高 → cache hit rate 可能 99%+ → DB 只收 ~500 QPS，完全可以。\n（行銷活動印在海報上的少數 QR，被幾百萬人掃 → 極端集中的熱點,天生適合 cache。）", DB, WHITE, 13)
+
+# ============ Slide: Step 2 — Cache 選型 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · STEP 2", "Cache 選型 — Local / Redis / CDN 三層比較")
+crows2 = [
+    ("維度", "Local Cache", "Redis / Memcached", "CDN Edge Cache"),
+    ("延遲", "最低（in-process）", "中（network hop）", "最低（離用戶近）"),
+    ("一致性", "差（每台各一份）", "好（共享）", "差（purge 慢）"),
+    ("Hit Rate", "無 sticky routing 則低", "高（共享）", "依流量集中度"),
+    ("容量", "受限於 server 記憶體", "獨立擴展", "依 CDN 供應商"),
+    ("適用場景", "極熱 key、不常變", "通用", "靜態或少變內容"),
+]
+ct2 = s.shapes.add_table(len(crows2), 4, Inches(0.6), Inches(1.7), Inches(12.15), Inches(3.3)).table
+ct2.columns[0].width = Inches(1.8); ct2.columns[1].width = Inches(3.45)
+ct2.columns[2].width = Inches(3.45); ct2.columns[3].width = Inches(3.45)
+for r in range(len(crows2)):
+    for c in range(4):
+        cell = ct2.cell(r, c)
+        cell.margin_top = Pt(3); cell.margin_bottom = Pt(3); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = crows2[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+box(s, Inches(0.6), Inches(5.2), Inches(12.15), Inches(0.95),
+    "本 scenario 選 Redis + CDN 雙層:CDN 擋第一層（離用戶近、減 origin 流量）· Redis 擋第二層（CDN miss 不直接打 DB）· DB 只處理 cold start / miss", GATEWAY, WHITE, 13)
+textbox(s, Inches(0.6), Inches(6.3), Inches(12.2), Inches(0.7), [
+    ("⚠ 雙層必要性看「規模 + 地理」:Local-only + 小流量 → 單層 Redis 也夠;跨區域 / >100K QPS → 雙層必要。本專案落點:第 7 題 Redis（單層）+ 附錄 B CDN 邊緣變體（選配升級到雙層）。", 12, MUTED, False, 2)])
+
+# ============ Slide: Step 3 — CDN TTL 兩難 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · STEP 3", "CDN 的 TTL 兩難 + Analytics 缺口")
+box(s, Inches(0.6), Inches(1.75), Inches(6.0), Inches(2.0),
+    "TTL 太長（例 24h）\n\n• URL 改了，CDN 在 TTL 內不更新\n• 用戶還被導到舊目標頁\n• 無法即時停用被濫用的 short link", RED, WHITE, 13)
+box(s, Inches(6.75), Inches(1.75), Inches(6.0), Inches(2.0),
+    "TTL 太短（例 10s）\n\n• CDN 幾乎等於沒 cache\n• 大量流量穿透到 origin\n• 失去 CDN 擋流量的意義", ANALYTICS, WHITE, 13)
+box(s, Inches(0.6), Inches(3.95), Inches(12.15), Inches(1.35),
+    "解法:合理 TTL + 主動 invalidation\n主動 purge：URL 改時呼叫 CDN purge API（Cloudflare 秒級 / CloudFront 分鐘級）\nSWR (stale-while-revalidate)：max-age=300, swr=60 → 0–300s 回 cache；300–360s 回舊值+背景拉新（用戶 0 等待）；360s+ 同步 origin", ACCENT, WHITE, 12)
+box(s, Inches(0.6), Inches(5.5), Inches(12.15), Inches(1.2),
+    "⚠ CDN 的副作用:analytics 缺口 —— CDN 命中時 request 不打到 API Server → 這部分流量永遠不 emit analytics event → Analytics Pipeline 需額外手段補（CDN logs / edge function / 取樣）", RED, WHITE, 12)
+
+# ============ Slide: Step 4 — Token 生成 scaling ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · STEP 4", "Token 生成也要 50K QPS？—— Creation flow 會被打爆嗎")
+bullets(s, Inches(0.7), Inches(1.9), Inches(6.0), Inches(3.0), [
+    "Hash-Based（教材方案）",
+    ("SHA-256 是 stateless 運算", 1),
+    ("CPU bound → 水平擴展就行", 1),
+    ("加機器 = 加產能，線性擴展", 1),
+    ("Operational complexity 低", 1),
+], size=14, gap=9)
+bullets(s, Inches(6.9), Inches(1.9), Inches(6.0), Inches(3.0), [
+    "Pre-generated Pool",
+    ("事先產生一批 unique token 存 DB", 1),
+    ("寫入時直接分配 → 零 collision", 1),
+    ("Pool 會不會被耗盡？需背景 job 補充", 1),
+    ("Operational complexity 高", 1),
+], size=14, gap=9)
+box(s, Inches(0.6), Inches(5.15), Inches(12.15), Inches(1.4),
+    "判斷:活動場景 creation QPS 遠低於 redirect QPS（建一次、掃千萬次）→ Hash-based 足夠,不需 pre-generated pool 的額外複雜度。\n（token 生成不是這個 scenario 的瓶頸——瓶頸在 redirect 讀路徑,見 Step 1-3。）", DB, WHITE, 13)
+
 # ============ Slide: 極限擴展 — 50x 推演 ============
 s = prs.slides.add_slide(BLANK)
 header(s, "極限擴展 · 50× 推演", "1k → 50k QPS：這套架構哪裡先崩？")
@@ -1179,6 +1269,134 @@ bullets(s, Inches(0.6), Inches(4.4), Inches(12.3), Inches(2.6), [
     "讀路徑：Redis cluster/多節點 + 拉高熱門命中;RDS read replica 分攤 cache-miss 讀(第 16 題)",
     "edge：熱門 token 用 CloudFront 短 TTL 邊緣 redirect(附錄 B)在邊緣消化大半流量;API GW 調高 throttle",
 ], size=13, gap=8)
+
+# ============ Slide: Analytics — 你想記錄什麼 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · ANALYTICS", "你想記錄什麼？—— Who / When / Where / What")
+awhat = [
+    ("Who", "IP / User-Agent\n裝置類型", CLIENT),
+    ("When", "掃描時間\n時區", GATEWAY),
+    ("Where", "Referer / GeoIP\n來源頁面", CDN),
+    ("What", "哪個 QR Code\n目標 URL", DB),
+]
+n = len(awhat); bw = Inches(2.9); gap = Inches(0.2); x0 = Inches(0.7); y = Inches(2.1)
+for i, (t, d, color) in enumerate(awhat):
+    box(s, x0 + i * (bw + gap), y, bw, Inches(1.5), t + "\n\n" + d, color, WHITE, 14)
+box(s, Inches(0.7), Inches(4.15), Inches(12.0), Inches(1.05),
+    "追問:這些資料若寫在 redirect 的 critical path 上 → 50K QPS 下每次多一個 DB write → DB 直接爆", RED, WHITE, 14)
+bullets(s, Inches(0.7), Inches(5.4), Inches(12.0), Inches(1.4), [
+    "所以拆兩條路徑:Redirect path（延遲敏感,要快 → Cache + DB）· Analytics path（量大可延遲,要穩 → Queue + Batch）",
+    "本專案:scan_events 明細（第 8 題非同步寫）+ 正式版事件流（附錄 J pipeline）",
+], size=13, gap=8)
+
+# ============ Slide: Analytics Store 選型 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · ANALYTICS", "Analytics Store 選型 —— 記錄下來存哪、怎麼查")
+asrows = [
+    ("", "OLTP (PostgreSQL)", "Time-Series (TimescaleDB)", "OLAP 自架 (ClickHouse)", "OLAP serverless (Athena/BigQuery)"),
+    ("寫入", "簡單", "優化過", "極快（batch）", "便宜"),
+    ("趨勢查詢", "慢", "快（時間分區）", "極快（columnar）", "中"),
+    ("單筆查詢", "快（索引）", "中", "中", "慢"),
+    ("成本", "高", "中", "中", "最低"),
+    ("適合", "小規模", "中規模+即時", "大規模+即時", "大規模+報表"),
+]
+at = s.shapes.add_table(len(asrows), 5, Inches(0.5), Inches(1.75), Inches(12.35), Inches(3.2)).table
+at.columns[0].width = Inches(1.5)
+for ci in (1, 2, 3, 4):
+    at.columns[ci].width = Inches(2.71)
+for r in range(len(asrows)):
+    for c in range(5):
+        cell = at.cell(r, c)
+        cell.margin_top = Pt(2); cell.margin_bottom = Pt(2); cell.margin_left = Pt(6)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = asrows[r][c]
+        _font(run, 11, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+box(s, Inches(0.5), Inches(5.2), Inches(12.35), Inches(1.35),
+    "選型取決於查詢模式:即時 dashboard + 時間序列 → TimescaleDB｜即時 + 複雜聚合 → ClickHouse 自架\n每日/每週報表 + 不想維運 → Athena / BigQuery 最划算（本專案附錄 J:S3 + Athena 歸檔 + RDS/DynamoDB 預聚合）", DB, WHITE, 12)
+
+# ============ Slide: 即時 vs 每日報表 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "極限擴展 · ANALYTICS", "即時 dashboard vs 每日報表 —— 架構一樣嗎？")
+textbox(s, Inches(0.6), Inches(1.55), Inches(12), Inches(0.4), [
+    ("即時 Dashboard（streaming，延遲 < 秒級,複雜度/成本高）", 14, ACCENT, True)])
+for i, (t, c) in enumerate([("Kafka", ANALYTICS), ("Flink / Spark\nStreaming", ANALYTICS), ("TimescaleDB", ANALYTICS), ("Dashboard\n(即時更新)", GATEWAY)]):
+    box(s, Inches(0.7) + i * Inches(3.05), Inches(2.05), Inches(2.7), Inches(0.9), t, c, WHITE, 12)
+    if i < 3:
+        arrow(s, Inches(0.7) + i * Inches(3.05) + Inches(2.7), Inches(2.5), Inches(0.7) + (i + 1) * Inches(3.05), Inches(2.5))
+textbox(s, Inches(0.6), Inches(3.3), Inches(12), Inches(0.4), [
+    ("每日報表（batch，延遲 = 小時級,簡單便宜）", 14, GREEN, True)])
+for i, (t, c) in enumerate([("SQS", GREEN), ("Consumer\n→ S3", GREEN), ("Daily\nBatch Job", GREEN), ("Report\n(每日更新)", GATEWAY)]):
+    box(s, Inches(0.7) + i * Inches(3.05), Inches(3.8), Inches(2.7), Inches(0.9), t, c, WHITE, 12)
+    if i < 3:
+        arrow(s, Inches(0.7) + i * Inches(3.05) + Inches(2.7), Inches(4.25), Inches(0.7) + (i + 1) * Inches(3.05), Inches(4.25))
+box(s, Inches(0.6), Inches(5.1), Inches(12.15), Inches(1.15),
+    "面試重點:先問需求再選架構。大部分 QR Code 服務「每日報表就夠了」→ 不要過度設計。\n（需要秒級即時才上 Kafka+Flink;否則 SQS + S3 + 每日 batch 最省。）", ACCENT, WHITE, 13)
+
+# ============ Slide: 面試框架 — 時間分配 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "面試實戰 · FRAMEWORK", "Design a QR Code Generator —— 45 分鐘時間分配")
+iframe = [
+    ("0–5 min：需求釐清", "靜態 or 動態？需要 analytics 嗎？預期 QPS？→ 問對問題 = 第一個加分點", AMBER),
+    ("5–15 min：High-Level Design", "教材內容要能流暢畫完:Creation flow + Retrieval flow", ACCENT),
+    ("15–35 min：Deep Dive（面試官挑 1–2 追問）", "Token collision → Week 1｜流量暴增 → Block 2｜Analytics → Block 3", DB),
+    ("35–45 min：收尾", "總結 trade-off + 反問面試官問題", GREEN),
+]
+cy = Inches(1.85)
+for title, body, strip in iframe:
+    st = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.6), cy, Inches(0.12), Inches(1.0))
+    st.fill.solid(); st.fill.fore_color.rgb = strip; st.line.fill.background(); st.shadow.inherit = False
+    bg = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.72), cy, Inches(12.0), Inches(1.0))
+    bg.fill.solid(); bg.fill.fore_color.rgb = LIGHT; bg.line.fill.background(); bg.shadow.inherit = False
+    textbox(s, Inches(0.95), cy + Inches(0.12), Inches(11.6), Inches(0.8),
+            [(title, 15, INK, True, 5), (body, 12.5, MUTED, False)])
+    cy += Inches(1.2)
+
+# ============ Slide: 面試常見扣分點 ============
+s = prs.slides.add_slide(BLANK)
+header(s, "面試實戰 · PITFALLS", "面試常見扣分點")
+pitfalls = [
+    ("需求沒問就開始畫圖", "靜態 vs 動態都沒確認,直接假設 → 面試官質疑溝通能力"),
+    ("只講 Happy Path", "沒考慮 failure case:cache miss、DB 掛、token collision → 缺工程深度"),
+    ("Deep Dive 太淺", "每個都講一點但都不深 → 不如挑一個講透,展示能「往下鑽」"),
+    ("沒有量化分析", "只說「加 cache 就好」但不算 hit rate、不算 DB 負載 → 缺說服力"),
+]
+cy = Inches(1.9)
+for title, body in pitfalls:
+    st = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.6), cy, Inches(0.12), Inches(1.0))
+    st.fill.solid(); st.fill.fore_color.rgb = RED; st.line.fill.background(); st.shadow.inherit = False
+    bg = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.72), cy, Inches(12.0), Inches(1.0))
+    bg.fill.solid(); bg.fill.fore_color.rgb = LIGHT; bg.line.fill.background(); bg.shadow.inherit = False
+    textbox(s, Inches(0.95), cy + Inches(0.14), Inches(11.6), Inches(0.8),
+            [(title, 15, INK, True, 5), (body, 12.5, MUTED, False)])
+    cy += Inches(1.25)
+
+# ============ Slide: 現場練習 — cache hit 掉到 50% ============
+s = prs.slides.add_slide(BLANK)
+header(s, "面試實戰 · PRACTICE", "追問:Cache hit rate 掉到 50%，你怎麼辦？")
+prrows = [
+    ("診斷方向", "應對策略"),
+    ("Working set > cache size（QR 數量暴增）", "加大 Redis 記憶體 / Redis Cluster 分片"),
+    ("TTL 設太短 → 頻繁過期 miss", "延長 TTL / stale-while-revalidate"),
+    ("Eviction policy 不對（LRU vs LFU）", "有 hot key → 換 LFU（Redis 4.0+）"),
+    ("Bot 掃冷門 token → cache penetration", "Negative caching：404 也 cache（短 TTL）"),
+]
+pr = s.shapes.add_table(len(prrows), 2, Inches(0.6), Inches(2.0), Inches(12.15), Inches(3.0)).table
+pr.columns[0].width = Inches(5.9); pr.columns[1].width = Inches(6.25)
+for r in range(len(prrows)):
+    for c in range(2):
+        cell = pr.cell(r, c)
+        cell.margin_top = Pt(4); cell.margin_bottom = Pt(4); cell.margin_left = Pt(10)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = prrows[r][c]
+        _font(run, 13, WHITE if r == 0 else INK, r == 0)
+box(s, Inches(0.6), Inches(5.35), Inches(12.15), Inches(1.0),
+    "答題要點:先「診斷」再「對策」—— 分辨是容量、TTL、eviction、還是穿透問題,對症下藥,而非一律「加機器」。", DB, WHITE, 13)
 
 prs.save("QR_Code_Generator.pptx")
 print("saved QR_Code_Generator.pptx ·", len(prs.slides._sldIdLst), "slides")
