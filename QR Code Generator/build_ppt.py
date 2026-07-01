@@ -504,6 +504,65 @@ right = [
 bullets(s, Inches(0.7), Inches(1.9), Inches(6.0), Inches(5), left, size=14, gap=8)
 bullets(s, Inches(6.9), Inches(1.9), Inches(6.0), Inches(5), right, size=14, gap=8)
 
+# ============ Slide 09-cache-1: Cache strategies overview ============
+s = prs.slides.add_slide(BLANK)
+header(s, "附錄 · CACHE 策略", "四種 Cache 策略 — 讀寫怎麼走")
+textbox(s, Inches(0.6), Inches(1.45), Inches(12.2), Inches(0.75), [
+    ("心法:cache 本質是 replication。兩個問題決定策略 →（1）誰是 master（DB 還是 cache）（2）複製是同步還是非同步。", 13, INK, False, 2),
+    ("策略沒有絕對對錯,看 write/read ratio、persistency、consistency 選最適合的。", 12, MUTED, False)])
+crows = [
+    ("策略", "讀（read）", "寫（write）", "master / 複製"),
+    ("Cache Aside", "先查 cache,miss → 讀 DB → 回填", "直接寫 DB（app 自己管 cache）", "DB / 惰性"),
+    ("Read Through", "只跟 cache 要,cache 自己回源 DB", "直接寫 DB", "DB / 惰性"),
+    ("Write Through", "直接讀 cache", "同時寫 cache + DB,兩者成功才算完成", "同步"),
+    ("Write Back", "直接讀 cache", "先寫 cache,再非同步刷回 DB", "cache / 非同步"),
+]
+ct = s.shapes.add_table(len(crows), 4, Inches(0.6), Inches(2.55), Inches(12.15), Inches(3.2)).table
+ct.columns[0].width = Inches(2.2); ct.columns[1].width = Inches(3.55)
+ct.columns[2].width = Inches(4.2); ct.columns[3].width = Inches(2.2)
+for r in range(len(crows)):
+    for c in range(4):
+        cell = ct.cell(r, c)
+        cell.margin_top = Pt(3); cell.margin_bottom = Pt(3); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = crows[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+textbox(s, Inches(0.6), Inches(5.95), Inches(12.2), Inches(1.1), [
+    ("Cache Aside / Read Through:master 是 DB、寫只進 DB → cache 惰性補;差別只在「誰負責回源」(app vs cache 元件)。", 12, MUTED, False, 2),
+    ("Write Through / Write Back:寫會碰 cache;差別在對 DB 是同步(慢但不丟) 還是非同步(快但可能丟)。", 12, MUTED, False)])
+
+# ============ Slide 09-cache-2: pros/cons + our choice ============
+s = prs.slides.add_slide(BLANK)
+header(s, "附錄 · CACHE 策略", "優缺點・適用・本專案落點")
+prows = [
+    ("策略", "優點", "缺點", "適用"),
+    ("Cache Aside", "資料不丟;最易實作", "首讀 cache miss;可能不一致", "讀多、可靠優先"),
+    ("Read Through", "程式碼簡潔", "同 Cache Aside", "讀多"),
+    ("Write Through", "無 cache miss(讀恆新)", "寫入延遲增加", "讀寫都要新鮮"),
+    ("Write Back", "無 miss;抗寫入重;減 DB 負荷", "未刷回前可能丟資料", "寫入重、可容忍丟失"),
+]
+pt = s.shapes.add_table(len(prows), 4, Inches(0.6), Inches(1.7), Inches(12.15), Inches(3.0)).table
+pt.columns[0].width = Inches(2.2); pt.columns[1].width = Inches(3.7)
+pt.columns[2].width = Inches(3.65); pt.columns[3].width = Inches(2.6)
+for r in range(len(prows)):
+    for c in range(4):
+        cell = pt.cell(r, c)
+        cell.margin_top = Pt(3); cell.margin_bottom = Pt(3); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = prows[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+box(s, Inches(0.6), Inches(5.05), Inches(12.15), Inches(1.0),
+    "本專案 redirect:讀走 Cache Aside(miss 回填)、改/刪時 write-around=invalidate(見下一頁 09b)", DB, WHITE, 13)
+textbox(s, Inches(0.6), Inches(6.25), Inches(12.2), Inches(0.9), [
+    ("為何是 Cache Aside 家族:read-heavy(302 遠多於寫)+ 連結/分析不能丟 → 不選 Write Back(未刷回可能丟);", 12, MUTED, False, 2),
+    ("不選 Write Through(多數 QR 從沒被掃,寫時全塞 cache 白佔記憶體)。TTL 兜底最終一致。 來源:homuchen.com/posts/databse-chache-strategies", 11, MUTED, False)])
+
 # ============ Slide 09b: Cache write strategy ============
 s = prs.slides.add_slide(BLANK)
 header(s, "09b · DEEP DIVE", "Cache 寫策略 — 讀 cache-aside，寫 write-around")
