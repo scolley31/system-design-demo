@@ -530,8 +530,9 @@ for r in range(len(crows)):
         p = cell.text_frame.paragraphs[0]
         run = p.add_run(); run.text = crows[r][c]
         _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
-textbox(s, Inches(0.6), Inches(5.95), Inches(12.2), Inches(1.1), [
+textbox(s, Inches(0.6), Inches(5.85), Inches(12.2), Inches(1.3), [
     ("Cache Aside / Read Through:master 是 DB、寫只進 DB → cache 惰性補;差別只在「誰負責回源」(app vs cache 元件)。", 12, MUTED, False, 2),
+    ("使用時機:模型不同/後補/部分控制/自寫降級 → Cache Aside(app 回源,本專案);想藏回源、應用變薄、有原生 read-through 產品(如 DAX) → Read Through(cache 回源)。", 12, INK, False, 2),
     ("Write Through / Write Back:寫會碰 cache;差別在對 DB 是同步(慢但不丟) 還是非同步(快但可能丟)。", 12, MUTED, False)])
 
 # ============ Slide 09-cache-2: pros/cons + our choice ============
