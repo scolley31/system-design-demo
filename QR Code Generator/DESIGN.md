@@ -284,6 +284,19 @@ CREATE INDEX idx_token_scanned ON scan_events (token, scanned_at);  -- 分析複
 
 何時反而選 write-through:寫完馬上一定會讀(read-your-write 高頻,如 session)。redirect 的「建立」與「被掃」無強時間關聯、讀遠多於寫 → write-around 勝。（scan 分析寫入是非同步、不進此 cache,見附錄 J。）
 
+**若真的選 write-through：cache 寫要不要 block？** 這是 write-through 內部還要再決定的子取捨——client 的寫入要不要**等 cache 寫完才回**:
+
+| | 阻塞式（cache 寫在 critical path，兩者成功才回） | 非阻塞式（DB commit 後背景更新 cache） |
+|---|---|---|
+| 寫延遲 | DB + cache 兩趟 | ≈ 只有 DB |
+| 一致性 | 強 read-after-write（下一讀保證新） | commit→cache 更新之間有 stale 窗口 |
+| cache 故障影響 | **cache 慢/掛 → 寫跟著慢/失敗**（cache 成為寫依賴） | 不影響寫入成功（背景失敗 → stale 到 TTL） |
+| 主要坑 | **partial failure**：DB 已 commit 但 cache 寫失敗 → fail 整筆（誤導,DB 已落地）還是回成功靠 TTL 自癒？ | **並發亂序**：W1(舊)/W2(新) 背景更新亂序落地 → cache 停舊值,需 versioning/CAS |
+
+另兩個一定要一起想的子問題:①**先寫誰**——DB-first（source of truth）再寫 cache 是標準（cache-first 若 DB 失敗會留「從沒持久化的幻影值」），但 DB-first 必有 commit→cache 空窗;②**並發互蓋**——cache 最終值取決於「誰最後寫到 cache」而非「誰最後 commit DB」→ 需版本號/CAS 才不倒退。
+
+**這正是本專案選 invalidate 的理由延伸**:`delete` 冪等、對順序不敏感、無部分值不一致——不管阻塞或並發,刪掉就是刪掉,下次讀從 DB 重建。write-through 的「block 與否 + partial failure + 並發互蓋」三個麻煩,invalidate 幾乎全繞開,這也是為什麼 read-heavy 場景直接 invalidate 比「調校 write-through 的 block 策略」更省心。
+
 ## 第 8 題：Scan 寫入（同步 vs 非同步）
 
 **這題在處理什麼**：每次掃 QR 打到 `/r/{token}` 時，我們要做兩件事——①記一筆掃描紀錄（給分析用）②回 302 跳轉。「Scan 寫入」指第①件。問題是：紀錄要**卡在使用者面前寫完**（同步），還是**先放使用者走、背景再補**（非同步）？核心判斷：跳轉不能等、記帳可以慢，所以把「可容忍延遲的分析」從「不可容忍延遲的跳轉」路徑上搬走。

@@ -616,6 +616,36 @@ bullets(s, Inches(0.7), Inches(4.9), Inches(11.9), Inches(2.3), [
     "何時反選 write-through：寫完馬上一定會讀（read-your-write 高頻，如 session）；redirect 建立與被掃無強時間關聯 → write-around 勝",
 ], size=13, gap=7)
 
+# ============ Slide 09c: write-through 要不要 block ============
+s = prs.slides.add_slide(BLANK)
+header(s, "09c · DEEP DIVE", "若選 write-through：cache 寫要不要 block？")
+textbox(s, Inches(0.6), Inches(1.45), Inches(12.2), Inches(0.5), [
+    ("子取捨:client 的寫入要不要「等 cache 寫完才回」?", 13, INK, False)])
+wtrows = [
+    ("維度", "阻塞式（cache 寫在 critical path）", "非阻塞式（DB commit 後背景更新）"),
+    ("寫延遲", "DB + cache 兩趟", "≈ 只有 DB"),
+    ("一致性", "強 read-after-write（下一讀保證新）", "commit→更新之間有 stale 窗口"),
+    ("cache 故障", "cache 慢/掛 → 寫跟著慢/失敗", "不影響寫入成功（stale 到 TTL）"),
+    ("主要坑", "partial failure：DB 已 commit 但 cache 寫失敗 → 難處理", "並發亂序：更新亂序落地 → 停舊值,需 versioning/CAS"),
+]
+wt = s.shapes.add_table(len(wtrows), 3, Inches(0.6), Inches(2.05), Inches(12.15), Inches(2.9)).table
+wt.columns[0].width = Inches(1.7); wt.columns[1].width = Inches(5.35); wt.columns[2].width = Inches(5.1)
+for r in range(len(wtrows)):
+    for c in range(3):
+        cell = wt.cell(r, c)
+        cell.margin_top = Pt(3); cell.margin_bottom = Pt(3); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = wtrows[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+bullets(s, Inches(0.6), Inches(5.15), Inches(12.2), Inches(1.0), [
+    "另兩個一起想:① 先寫誰 → DB-first（source of truth）再寫 cache（cache-first 若 DB 失敗留幻影值）,但必有 commit→cache 空窗;② 並發互蓋 → cache 最終值取決於「誰最後寫 cache」非「誰最後 commit」→ 需版本號/CAS",
+], size=12, gap=5)
+box(s, Inches(0.6), Inches(6.25), Inches(12.15), Inches(0.85),
+    "∴ 本專案選 invalidate:delete 冪等、對順序不敏感、無部分值不一致 → 繞開「block 與否 + partial failure + 並發互蓋」三個麻煩", CACHE, WHITE, 13)
+
 # ============ Slide 10: Reliability / data ============
 s = prs.slides.add_slide(BLANK)
 header(s, "10 · DEEP DIVE", "決策 3 — 可靠性與資料語意")
