@@ -400,6 +400,36 @@ textbox(s, Inches(0.55), Inches(4.4), Inches(12.2), Inches(2.4), [
     ("圖片是靜態內容 → 原型即時生成；正式版預生成存 object store + CDN（第 15 題）。", 13, MUTED, False, 6),
     ("樣式參數：dimension（像素邊長）· color（hex 黑塊色）· border（quiet zone 模組數）。", 13, MUTED, False)])
 
+# ============ Slide 07b: QR image storage trade-off ============
+s = prs.slides.add_slide(BLANK)
+header(s, "07b · QR IMAGE", "圖片存哪 — BLOB-in-DB vs Object Store（第 15 題）")
+textbox(s, Inches(0.6), Inches(1.45), Inches(12.2), Inches(0.7), [
+    ("關鍵性質:QR 編的是不變短碼 /r/{token} → 圖是靜態內容,一次算好即可純讀;經典取捨:二進位大物該不該進 DB?", 13, INK, False, 2)])
+srows = [
+    ("方案", "優", "劣"),
+    ("即時生成（原型）", "零儲存、URL 改圖自動對", "每次吃 CPU,高 QPS → app 變算圖機"),
+    ("存 DB（BLOB 欄位）", "一致性簡單、一個 store、有交易", "PNG 撐大表、吃 buffer pool/備份/複寫;DB 難放 CDN 後 → 貴"),
+    ("Object Store + CDN（採用）", "水平無限、單價低、邊緣快取最低延遲", "多一個 store、最終一致"),
+]
+st = s.shapes.add_table(len(srows), 3, Inches(0.6), Inches(2.25), Inches(12.15), Inches(2.4)).table
+st.columns[0].width = Inches(3.0); st.columns[1].width = Inches(4.35); st.columns[2].width = Inches(4.8)
+for r in range(len(srows)):
+    for c in range(3):
+        cell = st.cell(r, c)
+        cell.margin_top = Pt(3); cell.margin_bottom = Pt(3); cell.margin_left = Pt(8)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = ACCENT if r == 0 else (WHITE if r % 2 else LIGHT)
+        p = cell.text_frame.paragraphs[0]
+        run = p.add_run(); run.text = srows[r][c]
+        _font(run, 12, WHITE if r == 0 else (INK if c == 0 else MUTED), r == 0 or c == 0)
+box(s, Inches(0.6), Inches(4.95), Inches(12.15), Inches(1.0),
+    "通則:DB 只存指標(object key / URL),bytes 放 object store —— DB 的價值在交易/索引/查詢,不是當檔案伺服器", DB, WHITE, 13)
+bullets(s, Inches(0.7), Inches(6.15), Inches(11.9), Inches(1.0), [
+    "為何不進 DB:圖只會被整包讀、不查內容 → 佔 buffer pool + 備份/複寫頻寬,且 DB 擋不住 CDN 前的流量",
+    ("例外:小圖 + 低量 + 想少一個元件 → BLOB-in-DB 偶爾划算。樣式(dimension/color/border)不同視為不同圖,以 (token,樣式) 為 key", 1),
+], size=12, gap=6)
+
 # ============ Slide 9: Token decision ============
 s = prs.slides.add_slide(BLANK)
 header(s, "08 · DEEP DIVE", "決策 1 — Token 生成與碰撞")

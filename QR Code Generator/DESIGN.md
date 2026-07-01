@@ -368,12 +368,15 @@ repo 做 `url.lower().rstrip("/")` + 強制 http→https。
 | 選項 | 優 | 劣 |
 |---|---|---|
 | 即時生成（repo） | 零儲存、URL 改圖自動對 | 每次吃 CPU，高 QPS app server 變算圖機 |
-| 預生成 + object store | 一次算之後純讀 | 需儲存 |
+| 存 DB（BLOB 欄位） | 一致性簡單、一個 store 管全部、有交易 | PNG 幾 KB~幾十 KB 撐大表、吃 buffer pool/備份/複寫頻寬；DB 當檔案伺服器讀 → 貴且擋不住 CDN 前的流量 |
+| 預生成 + object store | 一次算之後純讀、水平無限、單價低 | 多一個 store、最終一致 |
 | **+ CDN（採用）** | 最低延遲、最省 server（PDF 建議） | 多 CDN 元件 |
+
+**經典取捨 BLOB-in-DB vs object store**：二進位大物該不該進 DB？**不該**。DB 的價值在交易/索引/查詢,拿它存「只會被整包讀取、不查內容」的圖檔是浪費——每 KB 都佔 buffer pool 與備份/複寫成本,且 DB 難放 CDN 後面(要嘛回源打 DB、要嘛連 SQL 一起快取)。object store 天生為「大物件 + HTTP 直取 + CDN 邊緣快取」而生,單價與擴展性都勝。**通則**：DB 只存指標(object key / URL),bytes 放 object store。（小圖 + 低量 + 想少一個元件時,BLOB-in-DB 才偶爾划算。）
 
 **細節**：樣式參數(`dimension/color/border`)不同是不同圖 → 用 `(token,樣式)` 當 key 首次生成後存起走 CDN。
 
-**定案**：預生成 + object store + CDN（原型保留即時生成）。
+**定案**：預生成 + object store + CDN（原型保留即時生成）。DB 只留 object key/URL，不存 bytes。
 
 ## 第 16 題：DB 擴展
 
