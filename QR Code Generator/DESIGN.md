@@ -243,6 +243,20 @@ CREATE INDEX idx_token_scanned ON scan_events (token, scanned_at);  -- 分析複
 
 **定案**：Redis。原型可暫用 dict 並註明替換點。
 
+**四種 Cache 策略總覽**（心法：cache 本質是 replication，看兩件事決定策略——① 誰是 master ② 複製同步或非同步）：
+
+| 策略 | 讀 | 寫 | master / 複製 | 優 | 劣 | 適用 |
+|---|---|---|---|---|---|---|
+| **Cache Aside** | 先查 cache，miss → 讀 DB → 回填 | 直接寫 DB（app 自管 cache） | DB / 惰性 | 資料不丟、最易實作 | 首讀 miss、可能不一致 | 讀多、可靠優先 |
+| **Read Through** | 只跟 cache 要，cache 自己回源 | 直接寫 DB | DB / 惰性 | 程式碼簡潔 | 同 Cache Aside | 讀多 |
+| **Write Through** | 直接讀 cache | 同時寫 cache + DB，兩者成功才算完成 | 同步 | 無 cache miss（讀恆新） | 寫入延遲增加 | 讀寫都要新鮮 |
+| **Write Back** | 直接讀 cache | 先寫 cache，再非同步刷回 DB | cache / 非同步 | 無 miss、抗寫入重、減 DB 負荷 | 未刷回前可能丟資料 | 寫入重、可容忍丟失 |
+
+- **Cache Aside vs Read Through**：讀寫走法一樣，差別只在 miss 時「誰回源」——app 程式碼（Aside）vs cache 層/loader（Read Through，如 DynamoDB DAX）。模型不同/後補/部分控制/自寫降級 → Aside；想藏回源、應用變薄、有原生 read-through 產品 → Read Through。
+- **Write Through vs Write Back**：寫都會碰 cache，差別在對 DB 是同步（慢但不丟）還是非同步（快但可能丟）。
+
+**本專案落點**：redirect 讀走 **Cache Aside**（miss 回填），改/刪走 **write-around（invalidate）**——read-heavy 且連結/分析不能丟，故不選 Write Back；多數 QR 從沒被掃，故不選每寫都塞 cache 的 Write Through。（來源：homuchen.com/posts/databse-chache-strategies）
+
 **寫策略：cache-aside 讀 + write-around（invalidate）寫**
 
 | 操作 | 對 cache | 模式 |
