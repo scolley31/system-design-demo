@@ -736,7 +736,19 @@ user_42   2026-06-26T03:00Z#JodCIMZx   ...
 
 ## 附錄 E：Rate Limiting（已實作，prototype→production 第一項）
 
-目標:防 script 惡意灌爆 API。採**縱深防禦**,兩層:
+**先分清兩層:Application Layer vs Infrastructure Layer**（情境:有人用 script 一秒打你 10 萬次,怎麼擋?）
+
+| 維度 | Application Layer | Infrastructure Layer |
+|---|---|---|
+| 常見手段 | token bucket / sliding window、per-API-key quota、回 429 | CDN + WAF（擋 L3–L7 DDoS）、LB connection limit、API Gateway throttling |
+| 跑在哪 | 你的 server code（middleware、sidecar） | CDN edge、WAF、LB、API Gateway |
+| 看得到的資訊 | 業務 context（認證後 user ID、訂閱 tier、資源所有權、業務狀態） | HTTP 通用內容（IP、headers、URL、body bytes），不解業務語意 |
+| 拒絕成本 | 高（已花 TCP+TLS+server CPU 才拒） | 低（在 edge 丟掉，不耗 origin） |
+| 粒度 | 細（per user、per endpoint、per resource） | 粗（per IP、per region、per connection） |
+
+**本專案目前只做 Infrastructure Layer**:匿名 QR 掃描沒有 user context,擋「單一 IP 洪水」在 edge 最划算(不耗 origin);per-user/tier 的業務限流(App Layer)需先有 auth 且成本較高,列為後續。
+
+目標:防 script 惡意灌爆 API。採**縱深防禦**,兩層(皆 Infra 層):
 
 | 層 | 機制 | 擋什麼 | 回應碼 |
 |---|---|---|---|
