@@ -84,8 +84,8 @@
       <button id="bump" class="ghost">version +1 再觸發（升級覆蓋）</button>
       <div id="eqresult" class="hint"></div>
 
-      <h2 style="margin-top:18px">📒 這台裝置的 Outbox</h2>
-      <button id="refresh" class="ghost">重新整理</button>
+      <h2 style="margin-top:18px">📒 這台裝置的 Outbox <span style="text-transform:none;color:var(--muted);font-weight:400">· 每 3 秒自動更新</span></h2>
+      <button id="refresh" class="ghost">立即重新整理</button>
       <table><thead><tr><th>alert_id</th><th>ver</th><th>channel</th><th>status</th></tr></thead>
         <tbody id="outbox"><tr><td colspan="4" class="empty">—</td></tr></tbody></table>
     </div>
@@ -170,6 +170,9 @@ async function loadOutbox() {
   tb.innerHTML = rows.map(x => `<tr><td class="mono">${x.alert_id}</td><td>${x.version}</td><td>${x.channel}</td><td class="s-${x.status}">${x.status}</td></tr>`).join("");
 }
 $("refresh").onclick = loadOutbox;
+// outbox 自動更新：每 3 秒輪詢，demo 時看得到狀態機即時變化（ENQUEUED→ATTEMPTED→VENDOR_ACCEPTED…）
+loadOutbox();
+setInterval(loadOutbox, 3000);
 </script>
 </body>
 </html>
