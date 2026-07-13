@@ -1,17 +1,21 @@
 name: Deploy Earthquake to AWS
 
+# 目前為「手動觸發」（workflow_dispatch）。
+# infra 尚未 terraform apply 前，push 自動觸發會在 OIDC assume-role 失敗（無 quake 角色/ECR）。
+# 待 infra apply + 設好 repo variable AWS_DEPLOY_ROLE_ARN（= terraform output gha_deploy_role_arn）後，
+# 再把下面 push: 區塊取消註解即可恢復「push 到 app 路徑自動部署」。
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Earthquake notification system/**"
-      - "!Earthquake notification system/*.md"
-      - "!Earthquake notification system/*.pptx"
-      - "!Earthquake notification system/build_ppt.py"
-      - "!Earthquake notification system/schema.sql"
-      - "!Earthquake notification system/infra/**"
-      - ".github/workflows/deploy-quake.yml"
   workflow_dispatch: {}
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "Earthquake notification system/**"
+  #     - "!Earthquake notification system/*.md"
+  #     - "!Earthquake notification system/*.pptx"
+  #     - "!Earthquake notification system/build_ppt.py"
+  #     - "!Earthquake notification system/schema.sql"
+  #     - "!Earthquake notification system/infra/**"
+  #     - ".github/workflows/deploy-quake.yml"
 
 permissions:
   id-token: write   # OIDC
