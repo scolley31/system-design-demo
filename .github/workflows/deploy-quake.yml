@@ -1,0 +1,84 @@
+name: Deploy Earthquake to AWS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Earthquake notification system/**"
+      - "!Earthquake notification system/*.md"
+      - "!Earthquake notification system/*.pptx"
+      - "!Earthquake notification system/build_ppt.py"
+      - "!Earthquake notification system/schema.sql"
+      - "!Earthquake notification system/infra/**"
+      - ".github/workflows/deploy-quake.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+  PROJECT: quake
+  ECR_REPOSITORY: quake
+  SSM_IMAGE_PARAM: /quake/IMAGE_URI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # EC2 是 t4g (arm64)，runner 是 amd64 → 需用 QEMU + buildx 跨平台 build arm64
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push image (linux/arm64)
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE_URI="$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA::12}"
+          docker buildx build --platform linux/arm64 \
+            -t "$IMAGE_URI" -t "$REGISTRY/$ECR_REPOSITORY:latest" \
+            --push "Earthquake notification system"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Update IMAGE_URI in SSM
+        run: |
+          aws ssm put-parameter --name "$SSM_IMAGE_PARAM" --type String \
+            --value "$IMAGE_URI" --overwrite
+
+      - name: Deploy to EC2 via SSM run-command
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy $IMAGE_URI" \
+            --targets "Key=tag:app,Values=$PROJECT" \
+            --parameters 'commands=["/usr/local/bin/deploy-app.sh"]' \
+            --query "Command.CommandId" --output text)
+          echo "Command: $CMD_ID"
+          for i in $(seq 1 40); do
+            sleep 6
+            STATUS=$(aws ssm list-command-invocations --command-id "$CMD_ID" \
+              --query "CommandInvocations[].Status" --output text || echo "")
+            echo "status: $STATUS"
+            case "$STATUS" in
+              *Failed*|*Cancelled*|*TimedOut*) echo "deploy failed"; exit 1;;
+            esac
+            if [ -n "$STATUS" ] && ! echo "$STATUS" | grep -qvE "Success"; then
+              echo "all targets succeeded"; exit 0
+            fi
+          done
+          echo "timed out waiting for deploy"; exit 1
