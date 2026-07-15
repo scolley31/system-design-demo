@@ -10,3 +10,4 @@ build_ppt.py
 DESIGN.md
 README.md
 infra/
+loadtest/

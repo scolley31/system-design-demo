@@ -9,6 +9,8 @@ on:
       - "!QR Code Generator/*.pptx"
       - "!QR Code Generator/build_ppt.py"
       - "!QR Code Generator/schema.sql"
+      - "!QR Code Generator/infra/**"
+      - "!QR Code Generator/loadtest/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch: {}
 

@@ -2,7 +2,7 @@
 
 QR Code Generator 的 production 雲端部署。架構:CloudFront → API Gateway (VPC Link) → 內部 ALB → EC2 ASG (Docker) → RDS PostgreSQL + ElastiCache Redis;S3 存 QR 圖、CloudFront 服務。
 
-詳見 `../QR Code Generator/DESIGN.md` 的 production 架構。
+詳見 `../DESIGN.md` 的 production 架構。
 
 ## 前置
 
@@ -14,7 +14,7 @@ QR Code Generator 的 production 雲端部署。架構:CloudFront → API Gatewa
 ## 部署步驟
 
 ```bash
-cd infra
+cd "QR Code Generator/infra"
 cp terraform.tfvars.example terraform.tfvars   # 視需要調整規格/成本
 export PATH="$HOME/bin:$PATH"
 terraform init
@@ -45,7 +45,7 @@ EC2 開機時若 `IMAGE_URI` 還沒有對應映像,會跳過(無 app 可跑)。�
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 REPO=$(terraform output -raw ecr_repository_url)
 aws ecr get-login-password --region ap-northeast-1 | docker login --username AWS --password-stdin "${REPO%/*}"
-docker build -t "$REPO:latest" "../QR Code Generator"
+docker build -t "$REPO:latest" ".."
 docker push "$REPO:latest"
 aws ssm put-parameter --name /qrcode/IMAGE_URI --type String --value "$REPO:latest" --overwrite
 # 觸發部署（對 ASG 實例執行 deploy 腳本）

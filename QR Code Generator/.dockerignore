@@ -9,3 +9,5 @@ build_ppt.py
 *.pptx
 DESIGN.md
 README.md
+infra/
+loadtest/

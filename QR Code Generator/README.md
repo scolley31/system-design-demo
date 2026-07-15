@@ -84,7 +84,7 @@ curl http://localhost:8000/api/v1/qr/{token}/analytics
 
 ## AWS 部署（production）
 
-已用 **Terraform** 部署到 AWS（`ap-northeast-1`）。程式改動全 **env-gated**：本機不設環境變數 → 維持 SQLite + 記憶體 cache + 即時生圖，**雲端與本機互不影響**。Runbook 與 IaC 在 [`../infra/`](../infra/)。
+已用 **Terraform** 部署到 AWS（`ap-northeast-1`）。程式改動全 **env-gated**：本機不設環境變數 → 維持 SQLite + 記憶體 cache + 即時生圖，**雲端與本機互不影響**。Runbook 與 IaC 在 [`infra/`](infra/)。
 
 ### 架構
 
@@ -138,10 +138,10 @@ git push (QR Code Generator/**)
 ### 部署 / 銷毀
 
 ```bash
-cd ../infra && export PATH="$HOME/bin:$PATH"
+cd infra && export PATH="$HOME/bin:$PATH"
 terraform init && terraform apply        # 約 58 個資源（會計費）
 terraform output cloudfront_url          # 對外網址
 terraform destroy                        # 不用時收掉、停止計費
 ```
 
-完整步驟（首次推映像、驗證、成本）見 [`../infra/README.md`](../infra/README.md)。
+完整步驟（首次推映像、驗證、成本）見 [`infra/README.md`](infra/README.md)。
