@@ -338,7 +338,7 @@ textbox(s, Inches(0.5), Inches(6.5), Inches(12.3), Inches(0.6), [
 
 # ============ Slide 7: Deep dive 1 — evolution ============
 s = prs.slides.add_slide(BLANK)
-header(s, "深入 1 · DISCOVERY", "如何有效率地發現並追蹤 5 億商品？— 三階段演進")
+header(s, "深入 1 · DISCOVERY", "發現並追蹤 5 億商品：三階段演進")
 stages = [
     ("(Naive) 盲爬", CLIENT, "seed → BFS 抓連結 → 平行 → 去重", [
         "Amazon 每 IP 限 1 req/s",
@@ -446,7 +446,7 @@ strip_rows(s, notes, y0=Inches(1.55), rh=Inches(0.74), gap=Inches(0.04), title_s
 
 # ============ Slide 11: Deep dive 2 — cron vs event-driven ============
 s = prs.slides.add_slide(BLANK)
-header(s, "深入 2 · NOTIFY", "如何有效率地處理價格變動並通知訂閱者？— cron 全表掃 → event-driven")
+header(s, "深入 2 · NOTIFY", "處理價格變動並通知：cron 全表掃 → event-driven")
 box(s, Inches(0.6), Inches(1.75), Inches(5.9), Inches(0.6), "現況：cron 每 2 小時掃 price 表", RED, WHITE, 15)
 card(s, Inches(0.6), Inches(2.45), Inches(5.9), Inches(2.4))
 bullets(s, Inches(0.8), Inches(2.6), Inches(5.5), Inches(2.2), [
@@ -483,7 +483,7 @@ textbox(s, Inches(0.6), Inches(6.5), Inches(12.2), Inches(0.5), [
 
 # ============ Slide 12: CDC vs dual-write ============
 s = prs.slides.add_slide(BLANK)
-header(s, "深入 2 · CDC vs DUAL-WRITE", "價格事件怎麼產生？CDC（log-based）vs dual-write（附錄 A）")
+header(s, "深入 2 · CDC vs DUAL-WRITE", "價格事件怎麼產生：CDC vs dual-write（附錄 A）")
 rows = [
     ("面向", "CDC（log-based，本專案）", "Dual-write"),
     ("一致性", "寫入端只寫 DB；事件從 log 衍生，不會漏", "DB 成功、發事件失敗 → 漏通知；反過來 → 幽靈通知。需 transactional outbox 補救"),
@@ -498,7 +498,7 @@ box(s, Inches(0.6), Inches(5.6), Inches(12.15), Inches(1.2),
 
 # ============ Slide 13: DynamoDB Streams + Redis vs Kafka ============
 s = prs.slides.add_slide(BLANK)
-header(s, "深入 2 · DYNAMODB STREAMS", "DynamoDB Streams 機制、三種消費形態、Redis Streams vs Kafka（附錄 B）")
+header(s, "深入 2 · DYNAMODB STREAMS", "DynamoDB Streams 機制與三種消費形態（附錄 B）")
 card(s, Inches(0.6), Inches(1.65), Inches(5.9), Inches(2.3))
 textbox(s, Inches(0.8), Inches(1.75), Inches(5.5), Inches(0.4), [("Streams 機制", 14, INK, True)])
 bullets(s, Inches(0.8), Inches(2.15), Inches(5.5), Inches(1.8), [
@@ -525,7 +525,7 @@ table(s, rows, Inches(0.6), Inches(4.15), Inches(12.15), Inches(2.6), [2.6, 4.6,
 
 # ============ Slide 14: price-change worker + outbox state machine ============
 s = prs.slides.add_slide(BLANK)
-header(s, "深入 2 · WORKER", "price-change worker 邏輯 + outbox 狀態機（app/worker_notify.py，附錄 G）")
+header(s, "深入 2 · WORKER", "price-change worker + outbox 狀態機（附錄 G）")
 steps = [
     ("① prev", "prev = last_event_price\n（消費端自己記，與寫入端分離）", CDN),
     ("② join 索引", "WHERE product_id AND status='active'\nAND price_threshold >= new", DB),
@@ -564,7 +564,7 @@ bullets(s, Inches(0.5), Inches(5.2), Inches(12.3), Inches(1.9), [
 
 # ============ Slide 15: Deep dive 3 — pre-aggregation ============
 s = prs.slides.add_slide(BLANK)
-header(s, "深入 3 · HISTORY", "如何快速提供價格歷史查詢以支援圖表？— raw 查詢 → pre-aggregation")
+header(s, "深入 3 · HISTORY", "價格歷史圖表：raw 查詢 → pre-aggregation")
 codebox(s, Inches(0.6), Inches(1.65), Inches(5.9), Inches(1.3), """SELECT date_trunc('day', ts), avg(price) FROM prices
  WHERE product_id = :pid AND ts >= now() - interval '2y'
  GROUP BY 1
@@ -726,7 +726,7 @@ bullets(s, Inches(0.6), Inches(5.75), Inches(12.2), Inches(1.4), [
 
 # ============ Slide 20: Interview framework + pitfalls ============
 s = prs.slides.add_slide(BLANK)
-header(s, "面試實戰 · FRAMEWORK", "Design Amazon Price Tracking —— 45 分鐘怎麼講 + 常見扣分點")
+header(s, "面試實戰 · FRAMEWORK", "45 分鐘怎麼講 + 常見扣分點")
 iframe = [
     ("0–5 min：需求釐清", "只追 Amazon？要 extension 嗎？5 億商品、< 500ms、1 小時通知 → 先算 5.8 天那條數學，說明盲爬為何不可行", AMBER),
     ("5–15 min：API + 資料模型 + High-Level", "兩支 API、prices append-only（DynamoDB）+ subscriptions 索引 + 彙總表；畫出 crawler / CDC / aggregator 三條路徑", ACCENT),
