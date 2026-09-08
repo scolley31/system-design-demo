@@ -76,6 +76,8 @@ def box(slide, x, y, w, h, text, fill, fg=WHITE, size=12, bold=True, shape=MSO_S
     tf.word_wrap = True
     tf.margin_top = Pt(2)
     tf.margin_bottom = Pt(2)
+    tf.margin_left = Pt(3)
+    tf.margin_right = Pt(3)
     for i, ln in enumerate(text.split("\n")):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.alignment = PP_ALIGN.CENTER
@@ -83,6 +85,13 @@ def box(slide, x, y, w, h, text, fill, fg=WHITE, size=12, bold=True, shape=MSO_S
         r.text = ln
         _font(r, size, fg, bold if i == 0 else False)
     return sp
+
+
+def line(slide, x1, y1, x2, y2, color=MUTED, width=1.75):
+    cn = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x1, y1, x2, y2)
+    cn.line.color.rgb = color
+    cn.line.width = Pt(width)
+    return cn
 
 
 def arrow(slide, x1, y1, x2, y2, color=MUTED, width=1.75):
@@ -263,7 +272,9 @@ box(s, Inches(9.8), yA, Inches(3.0), bh, "prices：DynamoDB\n(PK product_id, SK 
 arrow(s, Inches(2.2), yA + Inches(0.4), Inches(2.5), yA + Inches(0.4))
 arrow(s, Inches(4.0), yA + Inches(0.4), Inches(4.3), yA + Inches(0.4))
 arrow(s, Inches(6.5), yA + Inches(0.4), Inches(7.0), yA + Inches(0.4))
-arrow(s, Inches(6.5), yA + Inches(0.6), Inches(9.8), yA + Inches(0.6), color=GREEN, width=1.2)
+line(s, Inches(6.3), yA, Inches(6.3), yA - Inches(0.15), color=GREEN, width=1.2)   # API → prices(DynamoDB)：走上方繞過 Postgres
+line(s, Inches(6.3), yA - Inches(0.15), Inches(11.3), yA - Inches(0.15), color=GREEN, width=1.2)
+arrow(s, Inches(11.3), yA - Inches(0.15), Inches(11.3), yA, color=GREEN, width=1.2)
 # row B: crawler pipeline
 yB = Inches(3.05)
 box(s, Inches(0.5), yB, Inches(1.7), bh, "Scheduler\n優先分數 · due 排序", ANALYTICS, WHITE, 11)
@@ -377,7 +388,7 @@ interval = clamp(3600 / (1 + score), 60s, 86400s)
 # 分數越高爬越勤；captcha 狀態 ×4 退避；not_found 拉到最大間隔
 due      = now - last_seen_at >= interval
 # extension 回報也算「看過」→ crawler 可以晚點再來
-rank     = score × age / interval      # 每 tick 取 due 商品排序取前 N""", size=12)
+rank     = score × age / interval      # 每 tick 依 rank 取前 N""", size=12)
 card(s, Inches(8.2), Inches(1.65), Inches(4.55), Inches(2.3))
 bullets(s, Inches(8.4), Inches(1.8), Inches(4.2), Inches(2.1), [
     "log1p(view_count)：查看數邊際遞減，避免被刷",
@@ -435,14 +446,14 @@ s = prs.slides.add_slide(BLANK)
 header(s, "深入 1 · 反爬實測", "真抓 amazon.com：踩過的雷（附錄 E，2026-09）")
 notes = [
     ("TLS 指紋", "Amazon 在 TLS handshake 就比對 JA3/HTTP2 指紋，純 requests 直接被擋 → curl_cffi（curl-impersonate）讓指紋與真瀏覽器一致", CACHE),
-    ("impersonate=chrome124 被攔", "拿到「Click the button below to continue shopping」攔截頁（3.7KB、HTTP 200）；chrome120 / safari17_0 / edge101 拿到完整頁（1.2–2.7MB）→ 預設 chrome120，被擋就輪替指紋 + 新 cookie jar", AMBER),
+    ("impersonate=chrome124 被攔", "拿到「Click the button below to continue shopping」攔截頁（3.7KB、HTTP 200）；chrome120 / safari17_0 / edge101 拿到完整頁 → 預設 chrome120，被擋就輪替指紋 + 新 cookie jar", AMBER),
     ("幣別 cookie", "i18n-prefs=USD 固定顯示幣別，否則依 IP 換算，且 .a-offscreen 格式不穩", GATEWAY),
-    ("主價格區塊解析", "只從 #corePrice_feature_div / #apex_desktop … 的第一個 .a-price 組價（whole + fraction）；整頁第一個 .a-price 會抓到相關商品輪播；「Save 20% with Trade-In」會被當 $20", APP),
+    ("主價格區塊解析", "只從 #corePrice_feature_div / #apex_desktop … 的第一個 .a-price 組價（whole + fraction）；整頁第一個 .a-price 會抓到相關商品輪播、「Save 20% with Trade-In」會被當 $20", APP),
     ("region_locked", "非美國 IP 看到「cannot be shipped to your selected delivery location」→ buybox 沒價格；改配送地要登入 → 判成 region_locked（非缺貨）；正式版要美國出口 IP / proxy pool", CDN),
     ("Playwright fallback 成本", "能跑 JS、較能過 captcha，但映像 +400MB、每次吃 CPU/記憶體 → 只當 fallback（CRAWLER_PLAYWRIGHT=1）；限速 token bucket 1 rps + jitter", ANALYTICS),
     ("robots / ToS", "robots.txt 對 /dp/ 無明確 disallow 但 ToS 禁自動化；本專案為教學 demo：1 rps、不登入、不繞 captcha；正式產品應評估 Product Advertising API / 合法資料供應商", MUTED),
 ]
-strip_rows(s, notes, y0=Inches(1.55), rh=Inches(0.74), gap=Inches(0.04), title_size=13, body_size=12)
+strip_rows(s, notes, y0=Inches(1.5), rh=Inches(0.8), gap=Inches(0.03), title_size=12.5, body_size=11)
 
 # ============ Slide 11: Deep dive 2 — cron vs event-driven ============
 s = prs.slides.add_slide(BLANK)
@@ -530,14 +541,14 @@ steps = [
     ("① prev", "prev = last_event_price\n（消費端自己記，與寫入端分離）", CDN),
     ("② join 索引", "WHERE product_id AND status='active'\nAND price_threshold >= new", DB),
     ("③ 小波動過濾", "|Δ| < 1% 且沒人「這次才跨過門檻」\n→ 不通知、不寫 outbox", AMBER),
-    ("④ cooldown", "已通知 $120 → $118 再通知\n$119.5 不通知 (SKIPPED_COOLDOWN)", GATEWAY),
+    ("④ cooldown", "已通知 $120 → $118 再通知\n$119.5 不通知：\nSKIPPED_COOLDOWN", GATEWAY),
     ("⑤ outbox 冪等", "id = sha256(sub_id|event_seq)\n重播 / 重啟不重送", APP),
     ("⑥ 回升重設", "價格回到門檻之上\n→ last_notified_price = NULL", GREEN),
 ]
-n = len(steps); bw = Inches(1.95); gp = Inches(0.12); x0 = Inches(0.5); y = Inches(1.7)
+n = len(steps); bw = Inches(2.0); gp = Inches(0.09); x0 = Inches(0.5); y = Inches(1.7)
 for i, (t, d, color) in enumerate(steps):
     x = x0 + i * (bw + gp)
-    box(s, x, y, bw, Inches(1.35), t + "\n" + d, color, WHITE, 12)
+    box(s, x, y, bw, Inches(1.35), t + "\n" + d, color, WHITE, 11)
     if i < n - 1:
         arrow(s, x + bw, y + Inches(0.67), x + bw + gp, y + Inches(0.67))
 textbox(s, Inches(0.5), Inches(3.3), Inches(12.2), Inches(0.4), [("outbox 狀態機（sender per channel）", 15, INK, True)])
@@ -554,8 +565,11 @@ for i, (t, d, color) in enumerate(states):
     box(s, x, y, bw, Inches(1.1), t + "\n" + d, color, WHITE, 11)
 arrow(s, x0 + bw, y + Inches(0.55), x0 + bw + gp, y + Inches(0.55))
 arrow(s, x0 + 2 * bw + gp, y + Inches(0.55), x0 + 2 * (bw + gp), y + Inches(0.55), color=GREEN)
-arrow(s, x0 + 2 * bw + gp, y + Inches(0.85), x0 + 3 * (bw + gp), y + Inches(1.0), color=RED, width=1.2)
-bullets(s, Inches(0.5), Inches(5.2), Inches(12.3), Inches(1.9), [
+# ATTEMPTED → FAILED：走方框下方，不穿過 VENDOR_ACCEPTED
+line(s, x0 + bw + gp + bw / 2, y + Inches(1.1), x0 + bw + gp + bw / 2, y + Inches(1.22), color=RED, width=1.2)
+arrow(s, x0 + bw + gp + bw / 2, y + Inches(1.22), x0 + 3 * (bw + gp) + bw / 2, y + Inches(1.22), color=RED, width=1.2)
+line(s, x0 + 3 * (bw + gp) + bw / 2, y + Inches(1.22), x0 + 3 * (bw + gp) + bw / 2, y + Inches(1.1), color=RED, width=1.2)
+bullets(s, Inches(0.5), Inches(5.3), Inches(12.3), Inches(1.9), [
     "本質是 event stream ⋈ DB：每個事件只查該商品的訂閱，走 (product_id, price_threshold, user_id) covering index，不掃全表",
     "at-least-once（tailer 重播、worker 重啟）由 notification_id 冪等吸收：同一價格事件對同一訂閱只會有一筆 outbox",
     "dual-write 論點裡的「寫入端過濾 / 合併」在 CDC 架構下改放 consumer 端做（第 ③ 步）",
@@ -643,8 +657,8 @@ rows = [
     ("reporter 限流", "記憶體 deque", "Redis INCR + EXPIRE", "部署形態"),
     ("Auth", "無（前端產 user_id）", "Cognito JWT", "AUTH_ENABLED"),
 ]
-table(s, rows, Inches(0.6), Inches(1.6), Inches(12.15), Inches(4.9), [2.6, 3.6, 3.5, 2.45], size=11.5, head_size=12)
-textbox(s, Inches(0.6), Inches(6.6), Inches(12.2), Inches(0.5), [
+table(s, rows, Inches(0.6), Inches(1.55), Inches(12.15), Inches(4.7), [2.6, 3.6, 3.5, 2.45], size=11, head_size=12)
+textbox(s, Inches(0.6), Inches(6.85), Inches(12.2), Inches(0.45), [
     ("沿用 QR / Earthquake 的「工廠函式 + 延遲匯入」寫法：未設 env → 記憶體 / SQLite 實作；docker compose 走 Postgres + Redis Streams 的 production code path。", 12, MUTED, False)])
 
 # ============ Slide 18: AWS deployment + CI/CD ============
@@ -680,7 +694,7 @@ textbox(s, Inches(0.5), Inches(4.3), Inches(12.3), Inches(0.5), [
     ("Cognito(JWT) · SSM(設定) · Secrets Manager(DB 密碼) · ECR(映像) · EventBridge + Lambda(cleanup) · CloudWatch/SNS(監控告警)。SSE 過 CloudFront/API GW 有 buffering → dev-only。", 11, MUTED, False)])
 textbox(s, Inches(0.5), Inches(4.85), Inches(12.2), Inches(0.4), [("CI/CD（GitHub Actions，deploy-price.yml，workflow_dispatch 手動觸發）", 14, INK, True)])
 steps = [
-    ("workflow_dispatch", "手動觸發\n(infra 尚未 apply)", CLIENT),
+    ("手動觸發", "workflow_dispatch\n(infra 尚未 apply)", CLIENT),
     ("GitHub Actions", "OIDC assume role\n(無長期金鑰)", GATEWAY),
     ("buildx", "--platform\nlinux/arm64", APP),
     ("ECR push", "tag = SHA\n+ latest", DB),
@@ -688,7 +702,7 @@ steps = [
     ("SSM 部署", "send-command\ntag:app=price", ANALYTICS),
     ("上線", "deploy-app.sh\nALB /health", GREEN),
 ]
-n = len(steps); bw = Inches(1.62); gp = Inches(0.13); x0 = Inches(0.5); y = Inches(5.3)
+n = len(steps); bw = Inches(1.7); gp = Inches(0.1); x0 = Inches(0.5); y = Inches(5.3)
 for i, (t, d, color) in enumerate(steps):
     x = x0 + i * (bw + gp)
     box(s, x, y, bw, Inches(1.2), t + "\n" + d, color, WHITE, 11)

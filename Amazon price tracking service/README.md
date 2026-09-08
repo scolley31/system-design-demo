@@ -136,6 +136,14 @@ WITH_PLAYWRIGHT=1 docker compose up --build   # 含 Playwright fallback（映像
 
 `./.venv/bin/pip install python-pptx && ./.venv/bin/python build_ppt.py` → `Amazon_Price_Tracking_Service.pptx`。
 
+本機預覽 / 檢查版面（無 Keynote/PowerPoint 時）：`brew install --cask libreoffice && brew install poppler`，然後
+
+```bash
+FONTCONFIG_FILE=/opt/homebrew/etc/fonts/fonts.conf /Applications/LibreOffice.app/Contents/MacOS/soffice \
+  --headless --convert-to pdf Amazon_Price_Tracking_Service.pptx   # 不設 FONTCONFIG_FILE 會找不到 PingFang，中文全空白
+pdftoppm -png -r 60 Amazon_Price_Tracking_Service.pdf slide         # 每頁一張 PNG
+```
+
 ## AWS 部署（production）
 
 用 **Terraform** 部署到 AWS（`ap-northeast-1`），IaC 與 runbook 在 [`./infra/`](./infra/)。架構：
