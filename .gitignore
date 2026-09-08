@@ -7,3 +7,5 @@ __pycache__/
 # macOS / editors
 .DS_Store
 .idea/
+*.db-shm
+*.db-wal

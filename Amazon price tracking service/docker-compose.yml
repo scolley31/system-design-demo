@@ -1,0 +1,47 @@
+# 本地驗證 production code path（Postgres + Redis Streams）。
+# 與本機 uvicorn 啟動互不影響；需手動 `docker compose up --build` 才生效。
+# 注意：
+#  - PRICE_TABLE 不設 → prices 走 Postgres（BIGSERIAL seq 給 CDC tailer 輪詢），本地免 DynamoDB。
+#  - 預設真抓 amazon.com；離線/CI 用 `MOCK_AMAZON=1 docker compose up`。
+#  - port 5434 / 6381 / 8020 避開同 repo 其他 demo（5432/5433、6379/6380、8000/8010）。
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: price
+      POSTGRES_PASSWORD: price
+      POSTGRES_DB: price
+    ports: ["5434:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U price"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6381:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        WITH_PLAYWRIGHT: ${WITH_PLAYWRIGHT:-0}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["8020:8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://price:price@db:5432/price
+      REDIS_URL: redis://redis:6379/0
+      MOCK_AMAZON: ${MOCK_AMAZON:-0}
+      AMAZON_DOMAIN: ${AMAZON_DOMAIN:-www.amazon.com}
+      CRAWL_RPS: ${CRAWL_RPS:-1}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

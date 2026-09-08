@@ -1,0 +1,83 @@
+#!/bin/bash
+set -euxo pipefail
+
+dnf update -y
+dnf install -y docker
+systemctl enable --now docker
+
+# 部署腳本：從 SSM 撈設定 → ECR 登入 → pull → 重啟容器。
+# 開機時執行一次；CI/CD 也用 SSM run-command 呼叫同一支腳本做重新部署。
+# ROLE 由 Terraform 依 ASG（api / worker）注入，容器透過 -e ROLE 取得。
+cat > /usr/local/bin/deploy-app.sh <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+REGION="${region}"
+PREFIX="${ssm_prefix}"
+ROLE="${role}"
+
+get() {
+  aws ssm get-parameter --region "$REGION" --name "$1" --with-decryption \
+    --query Parameter.Value --output text 2>/dev/null || echo ""
+}
+
+IMAGE_URI="$(get "$PREFIX/IMAGE_URI")"
+if [ -z "$IMAGE_URI" ] || [ "$IMAGE_URI" = "None" ]; then
+  echo "IMAGE_URI not set yet; nothing to deploy."
+  exit 0
+fi
+
+DATABASE_URL="$(get "$PREFIX/DATABASE_URL")"
+REDIS_URL="$(get "$PREFIX/REDIS_URL")"
+PRICE_TABLE="$(get "$PREFIX/PRICE_TABLE")"
+AMAZON_DOMAIN="$(get "$PREFIX/AMAZON_DOMAIN")"
+CRAWL_RPS="$(get "$PREFIX/CRAWL_RPS")"
+# SSM 不收空字串，Terraform 以單一空白代替 → 這裡 trim 回空字串（空 = email channel 停用）
+SES_FROM_EMAIL="$(get "$PREFIX/SES_FROM_EMAIL" | tr -d '[:space:]')"
+SUSPICIOUS_DROP_PCT="$(get "$PREFIX/SUSPICIOUS_DROP_PCT")"
+MIN_CHANGE_PCT="$(get "$PREFIX/MIN_CHANGE_PCT")"
+BASE_URL="$(get "$PREFIX/BASE_URL")"
+AUTH_ENABLED="$(get "$PREFIX/AUTH_ENABLED")"
+COGNITO_REGION="$(get "$PREFIX/COGNITO_REGION")"
+COGNITO_USER_POOL_ID="$(get "$PREFIX/COGNITO_USER_POOL_ID")"
+COGNITO_CLIENT_ID="$(get "$PREFIX/COGNITO_CLIENT_ID")"
+COGNITO_DOMAIN="$(get "$PREFIX/COGNITO_DOMAIN")"
+COGNITO_REDIRECT_URI="$(get "$PREFIX/COGNITO_REDIRECT_URI")"
+
+REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+docker pull "$IMAGE_URI"
+
+# Monitoring：app 日誌送 CloudWatch Logs（awslogs driver）
+LOG_GROUP="$PREFIX/app"
+TOKEN="$(curl -s -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' || echo '')"
+IID="$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || echo priceapp)"
+
+docker rm -f priceapp 2>/dev/null || true
+docker run -d --name priceapp --restart always -p 8000:8000 \
+  --log-driver=awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$LOG_GROUP" \
+  --log-opt awslogs-create-group=true \
+  --log-opt awslogs-stream="$ROLE/$IID" \
+  -e ROLE="$ROLE" \
+  -e AWS_DEFAULT_REGION="$REGION" \
+  -e DATABASE_URL="$DATABASE_URL" \
+  -e REDIS_URL="$REDIS_URL" \
+  -e PRICE_TABLE="$PRICE_TABLE" \
+  -e AMAZON_DOMAIN="$AMAZON_DOMAIN" \
+  -e CRAWL_RPS="$CRAWL_RPS" \
+  -e SES_FROM_EMAIL="$SES_FROM_EMAIL" \
+  -e SUSPICIOUS_DROP_PCT="$SUSPICIOUS_DROP_PCT" \
+  -e MIN_CHANGE_PCT="$MIN_CHANGE_PCT" \
+  -e BASE_URL="$BASE_URL" \
+  -e AUTH_ENABLED="$AUTH_ENABLED" \
+  -e COGNITO_REGION="$COGNITO_REGION" \
+  -e COGNITO_USER_POOL_ID="$COGNITO_USER_POOL_ID" \
+  -e COGNITO_CLIENT_ID="$COGNITO_CLIENT_ID" \
+  -e COGNITO_DOMAIN="$COGNITO_DOMAIN" \
+  -e COGNITO_REDIRECT_URI="$COGNITO_REDIRECT_URI" \
+  "$IMAGE_URI"
+SCRIPT
+
+chmod +x /usr/local/bin/deploy-app.sh
+/usr/local/bin/deploy-app.sh || true

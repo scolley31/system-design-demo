@@ -1,0 +1,16 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+sqlalchemy==2.0.36
+sse-starlette==2.1.3
+# crawler：curl_cffi 模仿 Chrome TLS 指紋（Amazon 在 TLS handshake 就擋純 requests）；selectolax 解析
+curl_cffi==0.7.4
+selectolax==0.3.29
+# 正式版後端（env-gated；本機不設對應環境變數則不會用到）
+gunicorn==23.0.0
+psycopg2-binary==2.9.10
+redis==5.2.1
+boto3==1.35.90
+pyjwt[crypto]==2.10.1
+# Playwright fallback（選配，不預設安裝）：
+#   pip install playwright==1.49.1 && playwright install chromium
+#   然後 CRAWLER_PLAYWRIGHT=1 啟動；Docker 用 --build-arg WITH_PLAYWRIGHT=1

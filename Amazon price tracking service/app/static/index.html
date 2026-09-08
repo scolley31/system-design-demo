@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Amazon Price Tracking Service — Demo</title>
+  <style>
+    :root { --bg:#0f1420; --card:#1a2130; --line:#2b3446; --fg:#e7ecf3; --muted:#93a0b4; --accent:#ff9900; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --blue:#58a6ff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif; background:var(--bg); color:var(--fg); }
+    header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    header h1 { font-size:16px; margin:0; font-weight:600; }
+    .tag { font-size:12px; color:var(--muted); }
+    .wrap { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:16px 20px; max-width:1240px; margin:0 auto; }
+    @media (max-width:900px){ .wrap { grid-template-columns:1fr; } }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
+    .card h2 { font-size:13px; margin:0 0 10px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+    .card h2 small { text-transform:none; font-weight:400; }
+    label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+    input, select { width:100%; padding:8px 10px; background:#0d121c; border:1px solid var(--line); border-radius:6px; color:var(--fg); font-size:13px; }
+    .row { display:flex; gap:10px; align-items:flex-end; }
+    .row > div { flex:1; min-width:0; }
+    button { white-space:nowrap; margin-top:10px; padding:8px 13px; background:var(--accent); color:#111; border:0; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; }
+    button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+    button.sm { padding:4px 9px; font-size:12px; margin:0; }
+    button.on { outline:2px solid var(--accent); }
+    button:active { transform:translateY(1px); }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--muted); word-break:break-all; }
+    .hint { font-size:11px; color:var(--muted); margin-top:6px; }
+    .meta { font-size:12px; margin-top:6px; }
+    .meta b { color:var(--accent); }
+    .feed { margin-top:8px; max-height:260px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+    .alert { border:1px solid var(--accent); background:rgba(255,153,0,.08); border-radius:8px; padding:9px 12px; animation:pop .25s ease; }
+    @keyframes pop { from{opacity:0; transform:scale(.97);} to{opacity:1; transform:scale(1);} }
+    .alert b { color:var(--accent); }
+    .empty { color:var(--muted); font-size:12px; padding:6px 0; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; font-size:12px; }
+    th,td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-weight:500; white-space:nowrap; }
+    .tbl { max-height:240px; overflow:auto; }
+    .s-VENDOR_ACCEPTED,.s-ok,.s-accepted,.s-confirmed,.s-active{color:var(--ok);} .s-SKIPPED_COOLDOWN,.s-pending_verify,.s-unavailable,.s-region_locked{color:var(--warn);}
+    .s-ENQUEUED,.s-ATTEMPTED{color:var(--muted);} .s-FAILED,.s-rejected,.s-captcha,.s-http_error,.s-parse_error,.s-not_found,.s-blocked{color:var(--bad);}
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+    .dot.on { background:var(--ok); } .dot.off { background:var(--muted); }
+    svg { width:100%; height:220px; display:block; background:#0d121c; border:1px solid var(--line); border-radius:8px; margin-top:8px; }
+    .pill { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; border:1px solid var(--line); color:var(--muted); margin-right:4px; }
+    .pill.agg { border-color:var(--ok); color:var(--ok); } .pill.raw { border-color:var(--warn); color:var(--warn); }
+    .link { color:var(--blue); cursor:pointer; text-decoration:underline dotted; }
+    .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:12px; margin-top:6px; }
+    .kv span:nth-child(odd){ color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <span style="font-size:20px">🏷️</span>
+    <h1>Amazon Price Tracking Service</h1>
+    <span class="tag">demo · 真抓 amazon.com（curl_cffi → Playwright）· CDC → Redis Streams → 通知 · pre-aggregation 圖表</span>
+    <span class="tag mono" id="modeTag" style="margin-left:auto"></span>
+  </header>
+
+  <div class="wrap">
+    <!-- (a) 追蹤商品 + 價格歷史 -->
+    <div class="card">
+      <h2>📈 追蹤商品 + 價格歷史 <small>· GET /price/{id}?period=</small></h2>
+      <div class="row">
+        <div><label>ASIN 或 Amazon 商品網址</label><input id="asin" placeholder="0135957052 或 https://www.amazon.com/dp/B0CHX3QBCH"></div>
+        <div style="flex:0 0 auto"><button id="track" style="margin-top:0">追蹤</button></div>
+      </div>
+      <div class="hint" id="trackHint">從台灣 IP 抓 amazon.com：可國際配送的商品（書、配件）看得到價格；「無法配送到此地區」的商品會標 region_locked。</div>
+      <div class="row" style="margin-top:8px">
+        <div>
+          <span id="periods">
+            <button class="sm ghost" data-p="7d">7d</button><button class="sm ghost on" data-p="30d">30d</button><button class="sm ghost" data-p="90d">90d</button><button class="sm ghost" data-p="1y">1y</button><button class="sm ghost" data-p="2y">2y</button>
+          </span>
+        </div>
+        <div style="flex:0 0 130px"><select id="gran"><option value="">auto 粒度</option><option value="daily">daily</option><option value="weekly">weekly</option><option value="monthly">monthly</option></select></div>
+      </div>
+      <div id="title" class="meta" style="min-height:18px"></div>
+      <svg id="chart" viewBox="0 0 600 220" preserveAspectRatio="none"></svg>
+      <div class="meta" id="chartMeta">尚未選商品。追蹤一個商品，或從右側清單點 ASIN。</div>
+      <div class="row">
+        <div><button id="seed" class="ghost sm" style="margin-top:8px" hidden>灌 2 年假資料（seed，僅 mock）</button></div>
+        <div><button id="agg" class="ghost sm" style="margin-top:8px">立即彙總（pre-aggregate）</button></div>
+        <div><button id="statsBtn" class="ghost sm" style="margin-top:8px">raw vs 彙總 列數</button></div>
+      </div>
+      <div class="kv" id="stats"></div>
+    </div>
+
+    <!-- (b) 訂閱 + SSE -->
+    <div class="card">
+      <h2>🔔 訂閱降價門檻 + 即時通知 <small>· POST /subscriptions · SSE /stream</small></h2>
+      <div class="mono">user_id: <span id="uid"></span> <span class="hint">（每個分頁一個使用者）</span></div>
+      <div class="row">
+        <div><label>商品</label><input id="subAsin" placeholder="ASIN（預設=左側目前商品）"></div>
+        <div><label>門檻 price_threshold</label><input id="thr" type="number" step="0.01" placeholder="例 40"></div>
+        <div style="flex:0 0 100px"><label>notification_type</label><select id="ntype"><option value="sse">sse</option><option value="email">email</option></select></div>
+      </div>
+      <div class="row"><div><label>email（type=email 時）</label><input id="email" placeholder="you@example.com"></div><div style="flex:0 0 auto"><button id="subscribe" style="margin-top:0">訂閱</button></div></div>
+      <div class="status hint"><span id="dot" class="dot off"></span><span id="conn">SSE 未連線</span></div>
+      <div class="tbl"><table><thead><tr><th>商品</th><th>門檻</th><th>type</th><th>上次通知價</th><th></th></tr></thead><tbody id="subs"><tr><td colspan="5" class="empty">—</td></tr></tbody></table></div>
+      <h2 style="margin-top:14px">📨 即時通知</h2>
+      <div id="feed" class="feed"><div class="empty">尚無通知。價格跌破門檻時會出現在這裡。</div></div>
+    </div>
+
+    <!-- (c) 模擬 extension -->
+    <div class="card">
+      <h2>🧩 模擬 Chrome extension 回報 <small>· POST /price-reports（匿名 reporter_token）</small></h2>
+      <div class="mono">reporter_token: <span id="rtok"></span></div>
+      <div class="row">
+        <div><label>商品</label><input id="repAsin" placeholder="ASIN（預設=左側目前商品）"></div>
+        <div><label>我看到的價格</label><input id="repPrice" type="number" step="0.01"></div>
+      </div>
+      <div class="row">
+        <div><button id="repNormal" class="ghost">正常回報（現價 −3%）</button></div>
+        <div><button id="repSus" class="ghost">可疑回報（現價 −60%）</button></div>
+        <div><button id="repSend">送出上面的價格</button></div>
+      </div>
+      <div class="meta" id="repResult"></div>
+      <div class="hint">可疑（跌幅 > 30% 或尚無基準價）→ 不入庫、最高優先重爬驗證；crawler 結果才是真相 → confirmed / rejected。</div>
+      <div class="tbl"><table><thead><tr><th>#</th><th>回報價</th><th>基準價</th><th>偏差</th><th>status</th><th>驗證價</th></tr></thead><tbody id="reports"><tr><td colspan="6" class="empty">—</td></tr></tbody></table></div>
+    </div>
+
+    <!-- (d) crawler -->
+    <div class="card">
+      <h2>🕷️ Crawler：優先式爬取 <small>· score = 10·訂閱 + 2·log(查看) + 100·可疑 + boost · 每 3 秒更新</small></h2>
+      <div class="tbl"><table><thead><tr><th>ASIN</th><th>現價</th><th>score</th><th>間隔</th><th>下次</th><th>fetcher</th><th>狀態</th><th></th></tr></thead><tbody id="products"><tr><td colspan="8" class="empty">尚無商品</td></tr></tbody></table></div>
+      <div id="mockBox" hidden>
+        <div class="row"><div><label>mock：設定假 Amazon 的價格（模擬降價）</label><input id="mockPrice" type="number" step="0.01"></div><div style="flex:0 0 auto"><button id="mockSet" class="ghost" style="margin-top:0">設定並立即爬</button></div></div>
+      </div>
+      <h2 style="margin-top:14px">爬取紀錄</h2>
+      <div class="tbl"><table><thead><tr><th>時間</th><th>ASIN</th><th>原因</th><th>fetcher</th><th>狀態</th><th>價格</th><th>ms</th></tr></thead><tbody id="crawlLog"><tr><td colspan="7" class="empty">—</td></tr></tbody></table></div>
+    </div>
+
+    <!-- (e) outbox + CDC -->
+    <div class="card" style="grid-column:1 / -1">
+      <h2>📒 通知 Outbox 狀態機 + CDC 狀態 <small>· 冪等鍵 hash(subscription_id|event_seq) · cooldown · 每 3 秒更新</small></h2>
+      <div class="meta mono" id="cdc">—</div>
+      <div class="tbl"><table><thead><tr><th>event_seq</th><th>商品</th><th>old → new</th><th>門檻</th><th>channel</th><th>status</th><th>更新</th></tr></thead><tbody id="outbox"><tr><td colspan="7" class="empty">—</td></tr></tbody></table></div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const A = "/api/v1";
+let META = {};
+let userId = sessionStorage.getItem("user_id");
+if (!userId) { userId = "usr-" + Math.random().toString(36).slice(2, 8); sessionStorage.setItem("user_id", userId); }
+$("uid").textContent = userId;
+let rtok = sessionStorage.getItem("reporter_token");
+if (!rtok) { rtok = "rep-" + Math.random().toString(36).slice(2, 10); sessionStorage.setItem("reporter_token", rtok); }
+$("rtok").textContent = rtok;
+
+let cur = sessionStorage.getItem("cur_asin") || "";
+let curPrice = null, period = "30d";
+
+async function api(path, body, method) {
+  const r = await fetch(A + path, { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.status);
+  return data;
+}
+const fmt = (v, c) => v == null ? "—" : ((c || "USD") === "USD" ? "$" : (c + " ")) + Number(v).toFixed(2);
+const t = iso => iso ? new Date(iso + (iso.endsWith("Z") ? "" : "Z")).toLocaleTimeString() : "—";
+
+fetch(A + "/config/meta").then(r => r.json()).then(m => {
+  META = m;
+  $("modeTag").textContent = m.mock_amazon ? "MOCK_AMAZON=1（離線假 Amazon）" : `真抓 ${m.amazon_domain} · ${m.crawl_rps} rps · playwright=${m.playwright_enabled ? "on" : "off"} · ${m.price_backend}/${m.queue_backend}`;
+  $("seed").hidden = !m.allow_seed;
+  $("mockBox").hidden = !m.mock_amazon;
+  if (m.mock_amazon) { $("trackHint").textContent = "MOCK 模式：任何 10 碼 ASIN 都會產生假價格；用「灌 2 年假資料」看 pre-aggregation 效果。"; $("asin").placeholder = "B0MOCK0001"; }
+});
+
+// ---------- (a) 追蹤 + 圖表 ----------
+function setCur(asin) { cur = asin; sessionStorage.setItem("cur_asin", asin); $("subAsin").placeholder = $("repAsin").placeholder = asin; loadHistory(); loadReports(); }
+$("track").onclick = async () => {
+  try {
+    const p = await api("/products/track", { product_id: $("asin").value });
+    setCur(p.asin); $("chartMeta").textContent = p.crawl_enqueued ? "已註冊，正在最高優先爬取…（幾秒後自動更新）" : "已註冊";
+    setTimeout(loadHistory, 3500); setTimeout(loadHistory, 8000);
+  } catch (e) { $("chartMeta").textContent = "錯誤：" + e.message; }
+};
+$("periods").querySelectorAll("button").forEach(b => b.onclick = () => { $("periods").querySelectorAll("button").forEach(x => x.classList.remove("on")); b.classList.add("on"); period = b.dataset.p; loadHistory(); });
+$("gran").onchange = loadHistory;
+
+async function loadHistory() {
+  if (!cur) return;
+  try {
+    const g = $("gran").value;
+    const d = await api(`/price/${cur}?period=${period}${g ? "&granularity=" + g : ""}`);
+    curPrice = d.current_price;
+    $("title").innerHTML = `<b>${cur}</b> · ${d.title || "（標題待爬）"} · 現價 <b>${fmt(d.current_price, d.currency)}</b> <span class="hint">${t(d.current_price_at)}</span>`;
+    $("chartMeta").innerHTML = `<span class="pill ${d.source === "aggregation" ? "agg" : "raw"}">${d.source}</span><span class="pill">${d.granularity}</span> 讀 <b>${d.rows_scanned}</b> 列（期間 raw 有 ${d.raw_rows_in_period} 列）· 查詢 <b>${d.latency_ms} ms</b>`;
+    drawChart(d.points, d.currency);
+  } catch (e) { $("chartMeta").textContent = "錯誤：" + e.message; }
+}
+function drawChart(pts, c) {
+  const svg = $("chart"); svg.innerHTML = "";
+  if (!pts || !pts.length) { svg.innerHTML = `<text x="300" y="110" fill="#93a0b4" font-size="13" text-anchor="middle">尚無價格資料</text>`; return; }
+  const W = 600, H = 220, L = 48, R = 10, T = 12, B = 24;
+  const lo = Math.min(...pts.map(p => p.min)), hi = Math.max(...pts.map(p => p.max));
+  const pad = (hi - lo) * 0.1 || 1, y0 = lo - pad, y1 = hi + pad;
+  const x = i => L + (pts.length === 1 ? (W - L - R) / 2 : i * (W - L - R) / (pts.length - 1));
+  const y = v => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
+  let s = "";
+  for (let k = 0; k <= 4; k++) { const v = y0 + (y1 - y0) * k / 4; s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#2b3446"/><text x="${L - 4}" y="${y(v) + 4}" fill="#93a0b4" font-size="10" text-anchor="end">${v.toFixed(v > 100 ? 0 : 2)}</text>`; }
+  const band = pts.map((p, i) => `${x(i)},${y(p.max)}`).join(" ") + " " + pts.slice().reverse().map((p, i) => `${x(pts.length - 1 - i)},${y(p.min)}`).join(" ");
+  s += `<polygon points="${band}" fill="rgba(255,153,0,.12)"/>`;
+  s += `<polyline points="${pts.map((p, i) => `${x(i)},${y(p.avg)}`).join(" ")}" fill="none" stroke="#ff9900" stroke-width="2"/>`;
+  if (pts.length <= 60) s += pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.avg)}" r="2.5" fill="#ff9900"><title>${p.t.slice(0, 10)} avg ${p.avg} (min ${p.min} / max ${p.max}, n=${p.n})</title></circle>`).join("");
+  const step = Math.max(1, Math.ceil(pts.length / 6));
+  for (let i = 0; i < pts.length; i += step) s += `<text x="${x(i)}" y="${H - 8}" fill="#93a0b4" font-size="10" text-anchor="middle">${pts[i].t.slice(0, 10)}</text>`;
+  svg.innerHTML = s;
+}
+$("seed").onclick = async () => { if (!cur) return; $("chartMeta").textContent = "灌資料中（17,520 列）…"; const r = await api("/debug/seed", { product_id: cur, days: 730 }); $("chartMeta").textContent = `已灌 ${r.rows} 列，CDC checkpoint 推到 ${r.cdc_checkpoint}（不觸發通知）`; loadHistory(); loadStats(); };
+$("agg").onclick = async () => { if (!cur) return; const r = await api(`/aggregations/run?product_id=${cur}`, {}, "POST"); $("chartMeta").textContent = `彙總完成：upsert ${r.buckets_upserted} 個 bucket`; loadHistory(); loadStats(); };
+$("statsBtn").onclick = loadStats;
+async function loadStats() { if (!cur) return; const s = await api(`/aggregations/stats?product_id=${cur}`); $("stats").innerHTML = `<span>raw 列數</span><span>${s.raw_rows}</span><span>daily / weekly / monthly</span><span>${s.agg_rows.daily} / ${s.agg_rows.weekly} / ${s.agg_rows.monthly}</span><span>上次彙總</span><span>${t(s.last_aggregated_at)}</span>`; }
+
+// ---------- (b) 訂閱 + SSE ----------
+$("subscribe").onclick = async () => {
+  try {
+    const asin = $("subAsin").value || cur; if (!asin) throw new Error("先選商品");
+    await api("/subscriptions", { user_id: userId, product_id: asin, price_threshold: parseFloat($("thr").value), notification_type: $("ntype").value, email: $("email").value || null });
+    loadSubs(); connectSSE();
+  } catch (e) { alert("訂閱失敗：" + e.message); }
+};
+async function loadSubs() {
+  const rows = await api(`/subscriptions?user_id=${encodeURIComponent(userId)}`);
+  $("subs").innerHTML = rows.length ? rows.map(s => `<tr><td class="mono"><span class="link" onclick="setCur('${s.product_id}')">${s.product_id}</span></td><td>${fmt(s.price_threshold)}</td><td>${s.notification_type}</td><td>${fmt(s.last_notified_price)}</td><td><button class="sm ghost" onclick="delSub('${s.subscription_id}')">取消</button></td></tr>`).join("") : `<tr><td colspan="5" class="empty">尚無訂閱</td></tr>`;
+}
+window.delSub = async id => { await api(`/subscriptions/${id}`, null, "DELETE"); loadSubs(); };
+let es = null;
+function connectSSE() {
+  if (es) return;
+  es = new EventSource(`${A}/stream?user_id=${encodeURIComponent(userId)}`);
+  es.addEventListener("connected", () => { $("dot").className = "dot on"; $("conn").textContent = "SSE 已連線（等待降價）"; });
+  es.addEventListener("price_drop", e => { addAlert(JSON.parse(e.data)); loadOutbox(); loadSubs(); });
+  es.onerror = () => { $("dot").className = "dot off"; $("conn").textContent = "SSE 中斷，重試中…"; };
+}
+function addAlert(a) {
+  const feed = $("feed"); const empty = feed.querySelector(".empty"); if (empty) empty.remove();
+  const div = document.createElement("div"); div.className = "alert";
+  div.innerHTML = `<b>降價 ${fmt(a.old_price, a.currency)} → ${fmt(a.new_price, a.currency)}</b> · 門檻 ${fmt(a.threshold, a.currency)}<br><span class="mono">${a.product_id} · ${(a.title || "").slice(0, 60)} · seq ${a.event_seq} · 來源 ${a.source}</span>`;
+  feed.prepend(div);
+}
+
+// ---------- (c) extension 回報 ----------
+async function sendReport(price) {
+  const asin = $("repAsin").value || cur; if (!asin) { alert("先選商品"); return; }
+  try {
+    const r = await api("/price-reports", { product_id: asin, price, reporter_token: rtok });
+    $("repResult").innerHTML = r.status === "accepted"
+      ? `<span class="s-accepted">accepted</span> · 直接入庫（source=extension）→ CDC → 通知；偏差 ${r.deviation_pct == null ? "—" : (r.deviation_pct * 100).toFixed(1) + "%"}`
+      : `<span class="s-pending_verify">pending_verify</span> · ${r.reason} · 不入庫，${r.recrawl_enqueued ? "已排最高優先重爬" : "重爬已在途"}`;
+    loadReports(); setTimeout(loadReports, 4000); setTimeout(loadHistory, 4000);
+  } catch (e) { $("repResult").textContent = "錯誤：" + e.message; }
+}
+$("repNormal").onclick = () => { if (curPrice == null) return alert("目前商品尚無價格"); const p = +(curPrice * 0.97).toFixed(2); $("repPrice").value = p; sendReport(p); };
+$("repSus").onclick = () => { if (curPrice == null) return alert("目前商品尚無價格"); const p = +(curPrice * 0.4).toFixed(2); $("repPrice").value = p; sendReport(p); };
+$("repSend").onclick = () => sendReport(parseFloat($("repPrice").value));
+async function loadReports() {
+  if (!cur) return;
+  const rows = await api(`/price-reports?product_id=${cur}&limit=8`);
+  $("reports").innerHTML = rows.length ? rows.map(r => `<tr><td>${r.report_id}</td><td>${fmt(r.reported_price)}</td><td>${fmt(r.baseline_price)}</td><td>${r.deviation_pct == null ? "—" : (r.deviation_pct * 100).toFixed(1) + "%"}</td><td class="s-${r.status}">${r.status}</td><td>${fmt(r.verify_price)}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">尚無回報</td></tr>`;
+}
+
+// ---------- (d) crawler ----------
+window.crawlNow = async asin => { await api(`/products/${asin}/crawl`, {}, "POST"); setTimeout(loadProducts, 2500); setTimeout(loadCrawlLog, 2500); setTimeout(loadHistory, 3000); };
+async function loadProducts() {
+  const rows = await api("/products");
+  $("products").innerHTML = rows.length ? rows.map(p => `<tr><td class="mono"><span class="link" onclick="setCur('${p.asin}')">${p.asin}</span>${p.suspicious_flag ? ' <span class="pill raw">可疑</span>' : ""}</td><td>${fmt(p.last_price, p.currency)}</td><td>${p.score}</td><td>${p.interval_s}s</td><td>${p.crawl_inflight ? "爬取中" : p.due_in_s + "s"}</td><td>${p.last_fetcher || "—"}</td><td class="s-${p.last_crawl_status}" title="${p.last_error || ""}">${p.last_crawl_status || "—"}</td><td><button class="sm ghost" onclick="crawlNow('${p.asin}')">立即爬</button></td></tr>`).join("") : `<tr><td colspan="8" class="empty">尚無商品</td></tr>`;
+}
+async function loadCrawlLog() {
+  const rows = await api("/crawl/log?limit=8");
+  $("crawlLog").innerHTML = rows.length ? rows.map(r => `<tr><td>${t(r.created_at)}</td><td class="mono">${r.product_id}</td><td>${r.reason}</td><td>${r.fetcher || "—"}</td><td class="s-${r.status}" title="${r.error || ""}">${r.status}</td><td>${fmt(r.price)}</td><td>${r.duration_ms}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">—</td></tr>`;
+}
+$("mockSet").onclick = async () => { const asin = cur; if (!asin) return alert("先選商品"); await api("/debug/mock-price", { product_id: asin, price: parseFloat($("mockPrice").value) }); crawlNow(asin); };
+
+// ---------- (e) outbox + CDC ----------
+async function loadOutbox() {
+  const rows = await api(`/notifications?user_id=${encodeURIComponent(userId)}&limit=12`);
+  $("outbox").innerHTML = rows.length ? rows.map(x => `<tr><td>${x.event_seq}</td><td class="mono">${x.product_id}</td><td>${fmt(x.old_price)} → ${fmt(x.new_price)}</td><td>${fmt(x.threshold)}</td><td>${x.channel}</td><td class="s-${x.status}">${x.status}</td><td>${t(x.updated_at)}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">尚無紀錄（訂閱後等價格跌破門檻）</td></tr>`;
+}
+async function loadCdc() {
+  const c = await api("/cdc/status");
+  $("cdc").textContent = c.backend === "sql_seq"
+    ? `CDC ${c.backend} · checkpoint=${c.checkpoint} head_seq=${c.head_seq} lag=${c.lag} · 已發事件 ${c.events_published} · queues ${JSON.stringify(c.queues)}`
+    : `CDC ${c.backend} · shards=${(c.shards || []).length} · 已發事件 ${c.events_published} · queues ${JSON.stringify(c.queues)}`;
+}
+
+function refreshAll() { loadProducts(); loadCrawlLog(); loadOutbox(); loadCdc(); }
+loadSubs(); connectSSE(); refreshAll(); if (cur) setCur(cur);
+setInterval(refreshAll, 3000);
+</script>
+</body>
+</html>

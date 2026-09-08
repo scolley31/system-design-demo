@@ -1,0 +1,29 @@
+# 複製成 terraform.tfvars 後依需求調整。
+project = "price"
+region  = "ap-northeast-1"
+azs     = ["ap-northeast-1a", "ap-northeast-1c"]
+
+# 成本控制（demo 預設）
+single_nat_gateway = true
+db_multi_az        = false
+db_instance_class  = "db.t4g.micro"
+redis_node_type    = "cache.t4g.micro"
+ec2_instance_type  = "t4g.small"
+
+# api / worker 兩組 ASG 各自的容量（同一映像，靠 ROLE env 區分角色）
+asg_desired_capacity        = 1
+worker_asg_desired_capacity = 1
+
+# App 設定（app/config.py）
+amazon_domain       = "www.amazon.com"
+crawl_rps           = 1
+suspicious_drop_pct = 0.3
+min_change_pct      = 0.01
+# 填入已可收信的信箱才會建 SES identity（SES sandbox 需驗證寄件人與收件人）；留空停用 email channel
+ses_from_email = ""
+
+# 清理保留窗（天）
+outbox_retention_days    = 30
+crawl_log_retention_days = 7
+
+github_repo = "scolley31/system-design-demo"
