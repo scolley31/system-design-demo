@@ -38,6 +38,10 @@ def _setup_logging():
     logger.propagate = False
 
 
+# 模組載入時就先設好 handler：其他模組（fetcher/queue…）在 import 階段的 log 才不會丟失。
+_setup_logging()
+
+
 def current_request_id() -> str:
     return _request_id.get()
 

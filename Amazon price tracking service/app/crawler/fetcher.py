@@ -143,6 +143,9 @@ class PlaywrightFetcher:
                         "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"),
             locale="en-US", viewport={"width": 1366, "height": 850},
         )
+        # 與 curl_cffi 一致：固定顯示幣別
+        await ctx.add_cookies([{"name": "i18n-prefs", "value": AMAZON_CURRENCY,
+                                "domain": f".{AMAZON_DOMAIN.removeprefix('www.')}", "path": "/"}])
         try:
             page = await ctx.new_page()
             resp = await page.goto(url, wait_until="domcontentloaded", timeout=FETCH_TIMEOUT_S * 1000)

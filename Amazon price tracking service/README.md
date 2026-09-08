@@ -27,7 +27,7 @@ MOCK_AMAZON=1 uvicorn app.main:app --reload --port 8020
 
 > **從台灣 IP 抓 amazon.com**：可國際配送的商品（書、配件，例如 `0135957052`、`B0CHX3QBCH`）看得到價格；很多電子產品會是「This item cannot be shipped to your selected delivery location」→ 系統標 `region_locked`（Amazon 對國際 IP 改配送地要登入）。正式版 crawler 要放美國出口 IP，見 DESIGN 附錄 E。
 
-Playwright fallback（選配）：`pip install playwright==1.49.1 && playwright install chromium`，再以 `CRAWLER_PLAYWRIGHT=1` 啟動；`FORCE_PLAYWRIGHT=1` 可強制走 fallback 驗證。
+Playwright fallback（選配）：`pip install playwright==1.49.1 && playwright install chromium`，再以 `CRAWLER_PLAYWRIGHT=1` 啟動；`FORCE_PLAYWRIGHT=1` 可強制走 fallback 驗證。已本機驗證：curl_cffi 兩個指紋都被擋時自動升級 Playwright，同樣抓到 $45.97（USD cookie 一致），每次約 2–3.5 秒（curl_cffi 約 0.3–2 秒）。
 
 ## 前端（demo 頁）
 

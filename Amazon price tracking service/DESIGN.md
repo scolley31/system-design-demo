@@ -224,7 +224,7 @@ extension 回報 (asin, price)
 - **價格只能從主價格區塊解析**（`#corePrice_feature_div` / `#corePriceDisplay_desktop_feature_div` / `#apex_desktop` …）的第一個 `.a-price`，用 `.a-price-whole` + `.a-price-fraction` 組價。抓整頁第一個 `.a-price` 會抓到「相關商品輪播」的價格；`#apex_desktop` 的 "Save 20% with Trade-In" 文字會被當 $20 —— 都是實測踩過的雷。
 - **區域鎖定**：從非美國 IP 看很多商品是「This item cannot be shipped to your selected delivery location」→ buybox 價格不顯示；Amazon 現在對國際 IP 改配送地點要**登入**（glow address-change 回 sign-in），不登入無解。本專案把它判成 `region_locked` 狀態（非缺貨）。**正式版 crawler 要放美國出口 IP 或 proxy pool**；demo 用可國際配送的商品（書、配件）就看得到價格。
 - **限速**：token bucket `CRAWL_RPS`（預設 1）+ 0.9–1.4× jitter，對齊 PDF「每 IP 1 visit/sec」。
-- **Playwright**：能跑 JS、較能過 captcha，但映像 +400MB、每次吃 CPU/記憶體；只當 fallback（`CRAWLER_PLAYWRIGHT=1`）。
+- **Playwright**：能跑 JS、較能過 captcha，但映像 +400MB、每次吃 CPU/記憶體；只當 fallback（`CRAWLER_PLAYWRIGHT=1`）。實測：無頭 Chromium 每次 2–3.5 秒（curl_cffi 0.3–2 秒），結果與 curl_cffi 一致（含 region_locked 判定）；context 也要帶 `i18n-prefs` cookie 否則幣別依 IP 換算。
 - **robots / ToS**：Amazon robots.txt 對 `/dp/` 沒有明確 disallow 但 ToS 禁止自動化存取；本專案為系統設計教學 demo，1 rps、不登入、不繞 captcha；正式產品應評估 Product Advertising API / 合法資料供應商。
 
 ### F. 彙總粒度與 OLAP 替代
