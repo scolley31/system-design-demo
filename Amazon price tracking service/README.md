@@ -128,6 +128,8 @@ WITH_PLAYWRIGHT=1 docker compose up --build   # 含 Playwright fallback（映像
 
 `PRICE_TABLE` 不設 → prices 走 Postgres（BIGSERIAL seq 給 tailer 輪詢，本地免 DynamoDB）；SSE 需單一 process。
 
+> 原型 SQLite 走 WAL 模式：要清 `price.db` 請**先停掉 uvicorn** 再刪 `price.db` / `price.db-shm` / `price.db-wal` 三個檔；服務還開著就刪 -wal 會讓 DB 損毀（`database disk image is malformed`）。
+
 ### 本機驗 DynamoDB + Streams 路徑（DynamoDB Local）
 
 已驗證：put → Streams shard → tailer 發事件 → worker → SSE 收到；重啟後從 `cdc_checkpoint`（per-shard SequenceNumber）續讀、舊事件不重播。
