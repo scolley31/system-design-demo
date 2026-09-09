@@ -128,6 +128,17 @@ WITH_PLAYWRIGHT=1 docker compose up --build   # 含 Playwright fallback（映像
 
 `PRICE_TABLE` 不設 → prices 走 Postgres（BIGSERIAL seq 給 tailer 輪詢，本地免 DynamoDB）；SSE 需單一 process。
 
+### 本機驗 DynamoDB + Streams 路徑（DynamoDB Local）
+
+已驗證：put → Streams shard → tailer 發事件 → worker → SSE 收到；重啟後從 `cdc_checkpoint`（per-shard SequenceNumber）續讀、舊事件不重播。
+
+```bash
+docker run -d --rm --name ddb-local -p 8100:8000 amazon/dynamodb-local -jar DynamoDBLocal.jar -inMemory -sharedDb
+export AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local AWS_DEFAULT_REGION=us-east-1 AWS_ENDPOINT_URL=http://localhost:8100
+python -c "import boto3;boto3.client('dynamodb').create_table(TableName='price-local',AttributeDefinitions=[{'AttributeName':'product_id','AttributeType':'S'},{'AttributeName':'ts','AttributeType':'N'}],KeySchema=[{'AttributeName':'product_id','KeyType':'HASH'},{'AttributeName':'ts','KeyType':'RANGE'}],BillingMode='PAY_PER_REQUEST',StreamSpecification={'StreamEnabled':True,'StreamViewType':'NEW_IMAGE'})"
+PRICE_TABLE=price-local MOCK_AMAZON=1 uvicorn app.main:app --port 8020   # /api/v1/config/meta → price_backend=dynamodb；/cdc/status → backend=dynamodb_streams
+```
+
 ## 壓測
 
 `loadtest/`（k6）：`history`（驗 p95 < 500ms）、`report`（extension 寫入路徑）、`subscribe`。見 [`loadtest/README.md`](./loadtest/README.md)。
