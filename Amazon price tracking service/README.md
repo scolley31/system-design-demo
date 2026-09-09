@@ -16,12 +16,14 @@ FastAPI + SQLAlchemy + SQLite（原型）+ **curl_cffi**（模仿 Chrome TLS 指
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8020          # 真抓 amazon.com
+uvicorn app.main:app --reload --port 8020 --timeout-graceful-shutdown 5   # 真抓 amazon.com
 # 或離線 / CI：
-MOCK_AMAZON=1 uvicorn app.main:app --reload --port 8020
+MOCK_AMAZON=1 uvicorn app.main:app --reload --port 8020 --timeout-graceful-shutdown 5
 ```
 
 啟動後開 **http://localhost:8020/** 即是 demo 前端。
+
+> `--timeout-graceful-shutdown 5`：demo 頁有 SSE 長連線，沒有這個參數 uvicorn 收到 Ctrl-C / SIGTERM 會一直等連線關閉而不退出。
 
 可用環境變數覆寫（本機留空即走原型路徑）：`DATABASE_URL`、`REDIS_URL`、`PRICE_TABLE`（DynamoDB）、`MOCK_AMAZON`、`AMAZON_DOMAIN`（預設 www.amazon.com）、`AMAZON_CURRENCY`（USD）、`CRAWL_RPS`（1）、`CRAWLER_PLAYWRIGHT`、`SUSPICIOUS_DROP_PCT`（0.3）、`MIN_CHANGE_PCT`（0.01）、`SES_FROM_EMAIL`、`SCHEDULER_TICK_S`、`AGG_INTERVAL_S`、`ROLE`。
 

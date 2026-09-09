@@ -26,4 +26,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 # 注意：SSE 即時通知依賴行程內 realtime hub，需單一 process（見 realtime.py）；
 # 背景迴圈（scheduler / CDC tailer / workers / aggregator）也在同一 process 內。
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "5"]
