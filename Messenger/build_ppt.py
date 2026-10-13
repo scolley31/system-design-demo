@@ -205,7 +205,7 @@ box(s, Inches(0.9), Inches(2.0), Inches(1.5), Inches(1.5), "#n+1", ACCENT, WHITE
 textbox(s, Inches(0.9), Inches(3.7), Inches(11.5), Inches(2.5), [
     ("Messenger", 44, WHITE, True, 6),
     ("System Design demo — 群聊即時收發、離線補收、同 chat 順序一致", 20, RGBColor(0xCB, 0xD5, 0xE1), False, 10),
-    ("真多 process：2 gateway + 2 pub/sub shard owner + etcd + DynamoDB Local · kill 一台照樣連號無缺無重 · 附 AWS Terraform", 14, MUTED, False),
+    ("真多 process：2 gateway + 2 pub/sub + etcd + DynamoDB Local · kill 一台照樣連號 · 附 Terraform", 14, MUTED, False),
 ])
 
 # ============ Slide 2: Requirements & scale ============
@@ -360,7 +360,7 @@ cards = [
         "連鎖：需要 etcd lease + CAS 決定 owner",
     ]),
     ("③ 怎麼不亂、不丟", CACHE, "per-chat 連續序號\n+ 先持久化再 ack", [
-        "per-chat lock 內 message_id = head + 1",
+        "lock 內 message_id = head+1",
         "寫進 DB 成功才回 SUCCESS、才推送",
         "連續 → client 看到跳號就知道漏了、補拉",
         "連鎖：owner 會掛 → fencing + client_msg_id 去重",
