@@ -126,6 +126,8 @@ python scripts/smoke_ws.py ws://localhost:8030/gw1/ws ws://localhost:8030/gw2/ws
 | graceful 下線 chat owner（連發中） | 60 則全 SUCCESS、最慢一則 42ms |
 | owner 重新加入 | 自動 rebalance 回 8/8 |
 | 離線 5 則後重連 | 收到 #21–#25（catchup） |
+| k6 正常負載（60 VU、6 群、30s） | 896 則 → 8,960 次投遞；送達 p95 26ms、ack p95 26ms；缺號 / 重複 / 失敗 = 0 |
+| k6 failover（60 VU、45s；hard kill → rejoin → graceful stop，連跑 3 輪） | 每輪 ~1,350 則全部 SUCCESS；重複 / 亂序 0；偶發跳號由 client 補拉修好；ack 最慢 ~3.9s（hard kill 窗口） |
 
 看 DynamoDB Local 裡的資料：
 

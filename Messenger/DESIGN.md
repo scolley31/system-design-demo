@@ -166,6 +166,9 @@ return published(mid)                     # gateway 這時才回 sender SUCCESS
 - **重送不重複**：client 每則訊息帶 `client_msg_id`；逾時重送、gateway 重試、跨 failover 重試都用同一個 → owner LRU 或 `client_msg` 表回同一個 message_id、`dup=true`。
 - **離線補收**（PDF 的 offline flow）：連上 → `welcome` → **先訂閱、再補收**（`messages_after(chat_state.last_read)`）。順序反過來會有空窗：補收完、訂閱前送出的訊息會漏掉；先訂閱則最壞是收到重複，client 依 id 去重。
 - **ack 合併**：client 累積式 ack（只回報最大連號），gateway 每 500ms 批次寫 chat_state（只前進不後退）。代價：gateway 掛掉時最多重送 500ms 內的訊息 → at-least-once + client 去重，符合「不遺失」。
+- **gateway 端的兩道去重**（k6 failover 壓測抓到的競態，見附錄 B）：
+  - 每條連線記「已推送的最大 message_id」（floor）：補收直接讀 DB，可能比 owner 經內部連線推來的 live 那份更早看到同一則 → live 那份不再重推。
+  - 每個 chat 記 `last_forwarded`：shard 交接時，舊 owner 最後送出的幾則還卡在舊 link 的佇列裡，新 owner 的 head 比對已從 DB 補送過 → 晚到的舊份丟掉。
 - **一次補收上限 200 則**，`catchupDone.has_more` 時 client 自己 `fetchMessages` 往下拉。
 
 **實測**：bob 斷線期間 alice 送 5 則 → bob 重連收到 #21–#25（`catchup=true`）；重送同 `client_msg_id` → `dup=true`、同一個 message_id。
@@ -209,6 +212,10 @@ graceful：SIGTERM → fence（拒絕新 publish）→ revoke lease → key 立�
 - **逾時但其實寫成功了**：重試命中 `client_msg` 條件 → 同 id、`dup=true`。
 - **殭屍舊 owner**（GC 停頓、網路分割）：keepalive 超過 TTL−1s 沒成功就自我 fencing、拒絕 publish。萬一它在 fencing 前寫了 N+1，而新 owner 已讀到 head=N：新 owner 寫 N+1 撞 `attribute_not_exists` → `IdConflict` → 重讀 head、向 etcd 確認自己仍是 owner → 寫 N+2。殭屍寫的 N+1 在 DB 裡，接收端靠跳號補拉拿到。**結果：無遺失、無重號，DB 順序就是唯一真相。**
 - **etcd 整個掛掉**：既有 owner 繼續服務（沒人能搶）；但這段時間無法 failover。正式版 etcd 3 節點跨 3 AZ。
+- **兩個在壓測裡才現形的重複推送**（`TRACE_FWD=1` 逐則追蹤後確認，修正後連跑 3 輪 hard kill + rejoin + graceful stop：重複 0、送訊失敗 0）：
+  1. 補收 vs live 重疊：新連線訂閱後去 DB 補收，owner 剛寫入的 #1 同時被補收讀到、又經內部 WS 推來 → 同一條連線收到兩次。修法：連線層 floor。
+  2. 交接晚到：rebalance 時舊 owner 的最後一則還在舊 link 佇列、gateway 已在新 owner 用 head 比對從 DB 補送 → 舊份晚到。修法：chat 層 last_forwarded。
+  兩者內容都正確、client 也會去重，但 gateway 不該把重複推給使用者（行動裝置上是流量與電量）。
 - **500ms SLA 在 failover 窗口內不成立**（hard ≈ TTL）。降 TTL 可縮短，但誤判（GC 停頓就被踢）機率上升。
 
 ### C. DynamoDB 交易上限與 createChat

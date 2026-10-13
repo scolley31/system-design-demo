@@ -132,3 +132,16 @@ docker compose restart dynamodb && docker compose up init-tables   # 只清資�
 docker compose down                                                # 或整套關掉
 ```
 雲端 DynamoDB：用 `RUN_ID` 前綴（`lt-<run>-`）篩掉，或壓測專用環境整個 `terraform destroy`。壓完記得把 WAF 設定還原。
+
+
+## failover 實測（本機 compose，k6 v0.54）
+
+`VUS=60 CHATS=6 DURATION=45s ./run.sh failover`，t=15s `docker compose kill pubsub-1`、t=27s `start pubsub-1`（rebalance）、t=35s `stop pubsub-2`（graceful），連跑 3 輪：
+
+| run | sent | received | dup_or_out_of_order | seq_gaps（補拉修好） | send_failures |
+|---|---|---|---|---|---|
+| 9 | 1,348 | 13,480 | 0 | 0 | 0 |
+| 10 | 1,348 | 13,470 | 0 | 5 | 0 |
+| 11 | 1,349 | 13,490 | 0 | 0 | 0 |
+
+run 10 少的 10 則是補拉回來的（`fetchMessages` 回的訊息不計入 `messages_received`）。修正前曾抓到兩種重複推送（補收 vs live 重疊、交接晚到），原因與修法見 DESIGN 附錄 B。
