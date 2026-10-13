@@ -19,6 +19,7 @@ x-app: &app
     NUM_SHARDS: "16"
     LEASE_TTL_S: "5"
     ALLOW_DEBUG: "1"
+    TRACE_FWD: ${TRACE_FWD:-0}
 
 services:
   etcd:

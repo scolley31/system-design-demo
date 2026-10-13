@@ -38,6 +38,7 @@ class ClientConn:
         self.chats: set[str] = set()
         self.q: asyncio.Queue = asyncio.Queue(SEND_QUEUE_MAX)
         self.send_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self.floor: dict[str, int] = {}   # chat → 已推給這條連線的最大 message_id（擋掉「補收 vs live」的重疊）
         self.alive = True
         self._writer = asyncio.create_task(self._drain())
 
@@ -79,6 +80,7 @@ class GatewayNode:
         self._rec_lock = asyncio.Lock()
         self.stats = Counter()
         self._tasks: list[asyncio.Task] = []
+        self._trace = __import__("os").getenv("TRACE_FWD") == "1"
         self.map.on_change(self._on_map_change)
 
     # ------------------------------------------------------------ lifecycle
@@ -200,15 +202,28 @@ class GatewayNode:
         self.stats["repaired"] += len(items)
         logger.info("repair chat=%s %s→%s (%d msgs)", chat_id, lf, head, len(items))
         for m in items:
-            await self._on_deliver(chat_topic(chat_id), _msg_event(m, catchup=False, repaired=True))
+            await self._on_deliver(chat_topic(chat_id), _msg_event(m, catchup=False, repaired=True), repaired=True)
 
-    async def _on_deliver(self, topic: str, ev: dict):
+    async def _on_deliver(self, topic: str, ev: dict, repaired: bool = False):
         if topic.startswith("c:"):
             chat_id = topic[2:]
             mid = ev.get("message_id", 0)
+            if not repaired and mid <= self.last_forwarded.get(chat_id, 0):
+                # 交接競態：舊 owner 送出的最後幾則還在舊 link 的佇列裡，新 owner 的 head 比對已從 DB 補送過 → 丟掉重複
+                self.stats["dedup_dropped"] += 1
+                logger.info("dedup_dropped chat=%s mid=%s lf=%s owner=%s", chat_id, mid, self.last_forwarded.get(chat_id), ev.get("owner"))
+                return
             self.last_forwarded[chat_id] = max(self.last_forwarded.get(chat_id, 0), mid)
             for c in list(self.chat_conns.get(chat_id, ())):
+                if not repaired and mid <= c.floor.get(chat_id, 0):
+                    # 先訂閱再補收的重疊：補收直接讀 DB 已經送過這則，live 那份晚到 → 不重送
+                    self.stats["catchup_overlap_skip"] += 1
+                    continue
+                c.floor[chat_id] = max(c.floor.get(chat_id, 0), mid)
                 c.send(ev)
+            if repaired or self._trace:
+                logger.info("fwd chat=%s mid=%s repaired=%s owner=%s conns=%d", chat_id, mid, repaired, ev.get("owner"),
+                            len(self.chat_conns.get(chat_id, ())))
             self.stats["delivered"] += len(self.chat_conns.get(chat_id, ()))
         elif topic.startswith("u:"):
             user = topic[2:]
@@ -324,6 +339,8 @@ class GatewayNode:
         items, more = await run_db(store.messages_after, chat_id, after, CATCHUP_LIMIT)
         for m in items:
             c.send(_msg_event(m, catchup=True))
+        if items:
+            c.floor[chat_id] = max(c.floor.get(chat_id, 0), items[-1]["message_id"])
         c.send({"type": "catchupDone", "chat_id": chat_id, "count": len(items), "has_more": more})
         self.stats["catchup_msgs"] += len(items)
 

@@ -1,1 +1,387 @@
-<html><body>placeholder</body></html>
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Messenger — Demo</title>
+  <style>
+    :root { --bg:#0f1420; --card:#1a2130; --line:#2b3446; --fg:#e7ecf3; --muted:#93a0b4; --accent:#4f8cff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --me:#1f3b6e; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif; background:var(--bg); color:var(--fg); }
+    header { padding:12px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    header h1 { font-size:16px; margin:0; font-weight:600; }
+    .tag { font-size:12px; color:var(--muted); }
+    .wrap { display:grid; grid-template-columns:260px 1fr 360px; gap:14px; padding:14px 20px; max-width:1500px; margin:0 auto; }
+    @media (max-width:1100px){ .wrap { grid-template-columns:1fr; } }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
+    .card + .card { margin-top:14px; }
+    .card h2 { font-size:12px; margin:0 0 10px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+    .card h2 small { text-transform:none; font-weight:400; letter-spacing:0; }
+    label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+    input, select { width:100%; padding:7px 9px; background:#0d121c; border:1px solid var(--line); border-radius:6px; color:var(--fg); font-size:13px; }
+    .row { display:flex; gap:8px; align-items:flex-end; }
+    .row > * { min-width:0; }
+    .grow { flex:1; }
+    button { white-space:nowrap; padding:7px 12px; background:var(--accent); color:#fff; border:0; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; }
+    button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+    button.sm { padding:3px 8px; font-size:12px; font-weight:500; }
+    button.danger { background:transparent; border:1px solid var(--bad); color:var(--bad); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; }
+    .muted { color:var(--muted); }
+    .hint { font-size:11px; color:var(--muted); margin-top:6px; }
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; background:var(--muted); }
+    .dot.on { background:var(--ok); } .dot.wait { background:var(--warn); }
+    .chat-item { padding:8px 10px; border:1px solid var(--line); border-radius:8px; margin-top:6px; cursor:pointer; }
+    .chat-item.sel { border-color:var(--accent); background:rgba(79,140,255,.08); }
+    .chat-item .n { font-weight:600; font-size:13px; }
+    .badge { display:inline-block; min-width:18px; padding:0 6px; border-radius:9px; background:var(--accent); color:#fff; font-size:11px; text-align:center; margin-left:6px; }
+    .msgs { height:430px; overflow:auto; display:flex; flex-direction:column; gap:6px; padding:4px 2px; }
+    .msg { max-width:78%; padding:6px 10px; border-radius:10px; background:#232b3c; border:1px solid var(--line); }
+    .msg.me { align-self:flex-end; background:var(--me); }
+    .msg.sys { align-self:center; background:transparent; border-style:dashed; color:var(--muted); font-size:12px; }
+    .msg .meta { font-size:11px; color:var(--muted); }
+    .msg .id { color:#9cc0ff; font-weight:600; }
+    .msg.pending { opacity:.6; } .msg.failed { border-color:var(--bad); }
+    .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:12px; }
+    .kv span:nth-child(odd){ color:var(--muted); }
+    .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); margin:2px 4px 2px 0; }
+    .pill.ok { border-color:var(--ok); color:var(--ok); } .pill.warn { border-color:var(--warn); color:var(--warn); } .pill.bad { border-color:var(--bad); color:var(--bad); }
+    .grid { display:grid; grid-template-columns:repeat(8, 1fr); gap:4px; }
+    .cell { height:30px; border-radius:5px; font-size:10px; display:flex; align-items:center; justify-content:center; color:#0b0f17; font-weight:700; border:2px solid transparent; }
+    .cell.hl { border-color:#fff; }
+    .cell.none { background:#3a2230; color:var(--bad); }
+    .node { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--line); font-size:12px; }
+    .sw { width:12px; height:12px; border-radius:3px; display:inline-block; }
+    .log { height:150px; overflow:auto; font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--muted); white-space:pre-wrap; word-break:break-all; }
+    .log .in { color:#9fe0a8; } .log .out { color:#9cc0ff; }
+  </style>
+</head>
+<body>
+<header>
+  <span style="font-size:20px">💬</span>
+  <h1>Messenger</h1>
+  <span class="tag">demo · WebSocket + chat 分片 pub/sub（etcd）· per-chat 連續 message_id · persist-before-ack</span>
+  <span style="margin-left:auto" class="row">
+    <span style="width:150px"><input id="uid" class="mono" title="user_id（每個分頁一個）"></span>
+    <span style="width:190px"><select id="gwSel"></select></span>
+    <button id="connBtn">連線</button>
+    <span class="tag"><span id="dot" class="dot"></span><span id="connText">未連線</span></span>
+  </span>
+</header>
+
+<div class="wrap">
+  <!-- 左：聊天室 -->
+  <div>
+    <div class="card">
+      <h2>建立群聊 <small>· createChat（≤ <span id="maxP">100</span> 人）</small></h2>
+      <label>名稱</label><input id="chatName" placeholder="週末爬山">
+      <label>參與者（逗號分隔 user_id，自己會自動加入）</label><input id="chatPeople" class="mono" placeholder="bob, carol">
+      <div class="hint" id="peopleHint">開另一個分頁當 bob（user_id 不同即可）。</div>
+      <div style="margin-top:8px"><button id="createBtn" disabled>建立</button></div>
+    </div>
+    <div class="card">
+      <h2>我的聊天室 <small id="chatCount"></small></h2>
+      <div id="chatList"><div class="hint">連線後顯示。</div></div>
+    </div>
+  </div>
+
+  <!-- 中：訊息 -->
+  <div>
+    <div class="card">
+      <h2 id="chatTitle">訊息</h2>
+      <div class="hint mono" id="chatMeta">選一個聊天室</div>
+      <div class="msgs" id="msgs"></div>
+      <div class="row" style="margin-top:8px">
+        <div class="grow"><input id="text" placeholder="輸入訊息，Enter 送出" disabled></div>
+        <button id="sendBtn" disabled>送出</button>
+        <button id="burstBtn" class="ghost" disabled title="連發 20 則：搭配右側 kill 看 failover 時順序是否一致">連發 20 則</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div class="grow"><input id="memberId" class="mono" placeholder="user_id" disabled></div>
+        <button id="addBtn" class="ghost sm" disabled>ADD 成員</button>
+        <button id="rmBtn" class="ghost sm" disabled>REMOVE 成員</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>順序與延遲 <small>· 同一個 chat 所有人看到的順序必須一致</small></h2>
+      <div id="order"></div>
+      <div class="kv" style="margin-top:8px" id="lat"></div>
+      <div class="hint">ack_ms = 送出 → 收到 SUCCESS（已持久化）；echo_ms = 送出 → 自己收到 fan-out 回來的 newMessage（走完 owner → gateway 全程）。</div>
+    </div>
+  </div>
+
+  <!-- 右：cluster -->
+  <div>
+    <div class="card">
+      <h2>Cluster <small id="clusterSub">· shard → owner（每秒更新）</small></h2>
+      <div class="grid" id="grid"></div>
+      <div class="hint" id="gridHint">白框 = 目前聊天室所在的 shard（crc32(chat_id) % S）</div>
+      <div id="nodes" style="margin-top:8px"></div>
+      <div class="hint">graceful = revoke etcd lease，shard 立刻轉移；hard = 直接結束 process，等 lease TTL 過期（約 5s）才轉移。重新加入：<span class="mono">docker compose start pubsub-1</span></div>
+    </div>
+    <div class="card">
+      <h2>Shard 搬家紀錄</h2>
+      <div class="log" id="history"></div>
+    </div>
+    <div class="card">
+      <h2>Protocol log <small>· 最近 60 個 frame</small></h2>
+      <div class="log" id="plog"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const S = { ws:null, meta:null, user:null, gateway:null, chats:{}, sel:null, pending:{}, sentAt:{}, cmidAt:{},
+            ack:[], echo:[], wantConnected:false, backoff:500, cluster:null, ackTimers:{} };
+
+// ---------- 基本設定 ----------
+let uid = sessionStorage.getItem("user_id");
+if (!uid) { uid = "u-" + Math.random().toString(36).slice(2, 6); sessionStorage.setItem("user_id", uid); }
+$("uid").value = uid;
+$("uid").onchange = () => sessionStorage.setItem("user_id", $("uid").value.trim());
+
+fetch("api/config/meta").then(r => r.json()).then(m => {
+  S.meta = m; $("maxP").textContent = m.max_participants;
+  const opts = m.mode === "single" ? [["ws", `單 process（${m.node_id}）`]]
+    : [["ws", "auto（nginx least_conn）"], ["gw1/ws", "指定 gw-1"], ["gw2/ws", "指定 gw-2"]];
+  $("gwSel").innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+  const saved = sessionStorage.getItem("gw"); if (saved && opts.some(o => o[0] === saved)) $("gwSel").value = saved;
+  $("clusterSub").textContent = `· ${m.mode} · ${m.registry_backend} registry · ${m.store_backend} · S=${m.num_shards}`;
+  pollCluster(); setInterval(pollCluster, 1000);
+});
+$("gwSel").onchange = () => { sessionStorage.setItem("gw", $("gwSel").value); if (S.ws) { reconnectNow(); } };
+
+function apiBase() { const v = $("gwSel").value || "ws"; return v.startsWith("gw") ? v.split("/")[0] + "/" : ""; }
+function wsUrl() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const path = location.pathname.replace(/[^/]*$/, "");
+  return `${proto}//${location.host}${path}${$("gwSel").value || "ws"}?user_id=${encodeURIComponent(S.user)}`;
+}
+
+// ---------- 連線 ----------
+$("connBtn").onclick = () => { if (S.ws) { S.wantConnected = false; S.ws.close(); } else { S.wantConnected = true; connect(); } };
+function reconnectNow() { S.ws.onclose = null; S.ws.close(); S.ws = null; connect(); }
+
+function connect() {
+  S.user = $("uid").value.trim(); sessionStorage.setItem("user_id", S.user);
+  setConn("wait", "連線中…");
+  const ws = new WebSocket(wsUrl()); S.ws = ws;
+  ws.onmessage = ev => { const f = JSON.parse(ev.data); plog("in", f); onFrame(f); };
+  ws.onopen = () => { S.backoff = 500; $("connBtn").textContent = "斷線"; };
+  ws.onclose = ev => {
+    S.ws = null; $("connBtn").textContent = "連線"; enableUI(false);
+    if (S.wantConnected) { setConn("wait", `斷線（${ev.code}），${(S.backoff / 1000).toFixed(1)}s 後重連…`);
+      setTimeout(() => { if (S.wantConnected && !S.ws) connect(); }, S.backoff); S.backoff = Math.min(8000, S.backoff * 2); }
+    else setConn("", "未連線");
+  };
+}
+function setConn(cls, text) { $("dot").className = "dot " + cls; $("connText").textContent = text; }
+function send(f) { if (!S.ws || S.ws.readyState !== 1) return false; S.ws.send(JSON.stringify(f)); plog("out", f); return true; }
+function rid() { return Math.random().toString(36).slice(2, 10); }
+function uuid() { return crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : rid() + rid() + rid(); }
+function enableUI(on) {
+  ["createBtn"].forEach(id => $(id).disabled = !on);
+  const chatOn = on && !!S.sel;
+  ["text", "sendBtn", "burstBtn", "memberId", "addBtn", "rmBtn"].forEach(id => $(id).disabled = !chatOn);
+}
+
+// ---------- 收 frame ----------
+function chatObj(c) {
+  return { chat_id:c.chat_id, name:c.name, participants:c.participants || [], head:c.head || 0, lastSeen:c.last_read || 0,
+           msgs:new Map(), buffer:new Map(), unread:0, fetching:false, gapFills:0, dups:0, reorders:0, catchup:0, repaired:0 };
+}
+function onFrame(f) {
+  switch (f.type) {
+    case "welcome":
+      S.gateway = f.gateway_id; setConn("on", `已連線 · ${f.gateway_id}`);
+      const keep = S.chats; S.chats = {};
+      for (const c of f.chats) S.chats[c.chat_id] = keep[c.chat_id] ? Object.assign(keep[c.chat_id], {head:c.head, participants:c.participants}) : chatObj(c);
+      if (S.sel && !S.chats[S.sel]) S.sel = null;
+      enableUI(true); renderChats(); renderMsgs(); return;
+    case "newMessage": return onNewMessage(f, false);
+    case "catchupDone": { const c = S.chats[f.chat_id]; if (c && f.has_more) fetchAfter(c); return; }
+    case "messages": { const c = S.chats[f.chat_id]; if (!c) return; c.fetching = false;
+      for (const m of f.items) onNewMessage(m, true); if (f.has_more) fetchAfter(c); renderAll(); return; }
+    case "result": return onResult(f);
+    case "chatAdded": if (!S.chats[f.chat_id]) S.chats[f.chat_id] = chatObj(f); renderChats(); return;
+    case "chatRemoved": delete S.chats[f.chat_id]; if (S.sel === f.chat_id) S.sel = null; renderAll(); return;
+    case "chats": for (const x of f.chats) { const c = S.chats[x.chat_id]; if (c) { c.participants = x.participants; c.name = x.name; } else S.chats[x.chat_id] = chatObj(x); }
+      return renderAll();
+    case "error": console.warn("server error", f); return;
+  }
+}
+
+// client 端排序：message_id 是 per-chat 連續序號 → 看到跳號就知道漏了，補拉；小於等於已看過的 = 重複，丟掉
+function onNewMessage(m, fromFetch) {
+  const c = S.chats[m.chat_id]; if (!c) return;
+  const id = m.message_id;
+  if (m.client_msg_id && S.cmidAt[m.client_msg_id] && !m.catchup) {   // 自己發的 fan-out 回來了
+    S.echo.push(performance.now() - S.cmidAt[m.client_msg_id]); delete S.cmidAt[m.client_msg_id];
+  }
+  if (m.client_msg_id && S.pending[m.client_msg_id]) { delete S.pending[m.client_msg_id]; }
+  if (m.catchup && !fromFetch) c.catchup++;
+  if (m.repaired) c.repaired++;
+  if (m.kind === "system" && !fromFetch && !m.catchup) send({ type:"listChats", req_id:rid() });  // 成員變了 → 刷新成員列表
+  if (id <= c.lastSeen) {
+    if (c.msgs.has(id)) { if (!fromFetch) c.dups++; }
+    else c.msgs.set(id, m);  // 歷史（例如打開聊天室時往回拉）
+    return renderSoon();
+  }
+  if (id === c.lastSeen + 1) {
+    c.msgs.set(id, m); c.lastSeen = id;
+    while (c.buffer.has(c.lastSeen + 1)) { const n = c.buffer.get(c.lastSeen + 1); c.buffer.delete(c.lastSeen + 1);
+      c.msgs.set(n.message_id, n); c.lastSeen = n.message_id; c.reorders++; }
+  } else {
+    c.buffer.set(id, m);
+    if (!c.fetching) { c.gapFills++; fetchAfter(c); }
+  }
+  c.head = Math.max(c.head, c.lastSeen);
+  if (S.sel !== c.chat_id) c.unread++;
+  scheduleAck(c); renderSoon();
+}
+function fetchAfter(c) { c.fetching = true; send({ type:"fetchMessages", req_id:rid(), chat_id:c.chat_id, after_id:c.lastSeen, limit:200 }); }
+function scheduleAck(c) {
+  clearTimeout(S.ackTimers[c.chat_id]);
+  S.ackTimers[c.chat_id] = setTimeout(() => send({ type:"ack", chat_id:c.chat_id, message_id:c.lastSeen }), 300);
+}
+
+function onResult(f) {
+  if (f.op === "createChat") {
+    if (f.status === "SUCCESS") { if (!S.chats[f.chat_id]) S.chats[f.chat_id] = chatObj(f.chat); selectChat(f.chat_id); }
+    else alert(`建立失敗：${f.error} ${f.detail || ""}`);
+    return renderChats();
+  }
+  if (f.op === "modifyChatParticipants") { if (f.status !== "SUCCESS") alert(`成員變更失敗：${f.error} ${f.detail || ""}`); return; }
+  if (f.op === "sendMessage") {
+    const p = S.pending[f.client_msg_id], t0 = S.sentAt[f.req_id]; delete S.sentAt[f.req_id];
+    if (t0) S.ack.push(performance.now() - t0);
+    if (f.status === "SUCCESS") { if (p) { p.state = "persisted"; p.message_id = f.message_id; } }
+    else if (p) { p.state = "failed"; p.error = f.error; }
+    renderSoon();
+  }
+}
+
+// ---------- 動作 ----------
+$("createBtn").onclick = () => {
+  const people = $("chatPeople").value.split(",").map(s => s.trim()).filter(Boolean);
+  send({ type:"createChat", req_id:rid(), name:$("chatName").value.trim(), participants:people });
+};
+$("chatPeople").oninput = () => {
+  const n = new Set([S.user, ...$("chatPeople").value.split(",").map(s => s.trim()).filter(Boolean)]).size;
+  const max = S.meta ? S.meta.max_participants : 100;
+  $("peopleHint").innerHTML = n > max ? `<span style="color:var(--bad)">${n} 人 > 上限 ${max}，server 會拒絕</span>` : `共 ${n} 人（含自己）`;
+};
+function sendText(text, cmid) {
+  if (!S.sel || !text) return;
+  cmid = cmid || uuid();
+  const r = rid();
+  S.pending[cmid] = { client_msg_id:cmid, chat_id:S.sel, text, state:"pending", created_by:S.user };
+  S.sentAt[r] = performance.now(); S.cmidAt[cmid] = performance.now();
+  if (!send({ type:"sendMessage", req_id:r, chat_id:S.sel, client_msg_id:cmid, text, client_ts:Date.now() })) S.pending[cmid].state = "failed";
+  renderSoon();
+}
+$("sendBtn").onclick = () => { sendText($("text").value.trim()); $("text").value = ""; };
+$("text").onkeydown = e => { if (e.key === "Enter" && !e.isComposing) $("sendBtn").onclick(); };
+$("burstBtn").onclick = async () => { for (let i = 1; i <= 20; i++) { sendText(`連發 ${i}/20 from ${S.user}`); await new Promise(r => setTimeout(r, 120)); } };
+window.resend = cmid => { const p = S.pending[cmid]; if (p) { p.state = "pending"; sendText(p.text, cmid); } };
+const modify = op => { const u = $("memberId").value.trim(); if (u) send({ type:"modifyChatParticipants", req_id:rid(), chat_id:S.sel, user_id:u, operation:op }); };
+$("addBtn").onclick = () => modify("ADD"); $("rmBtn").onclick = () => modify("REMOVE");
+
+window.selectChat = id => {
+  S.sel = id; const c = S.chats[id]; c.unread = 0;
+  if (c.msgs.size === 0 && c.lastSeen > 0)  // 打開時往回拉最近 50 則歷史
+    send({ type:"fetchMessages", req_id:rid(), chat_id:id, after_id:Math.max(0, c.lastSeen - 50), limit:50 });
+  enableUI(!!S.ws); renderAll();
+};
+
+// ---------- render ----------
+let raf = 0;
+function renderSoon() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderAll(); }); }
+function renderAll() { renderChats(); renderMsgs(); renderOrder(); renderLat(); }
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+function renderChats() {
+  const list = Object.values(S.chats);
+  $("chatCount").textContent = list.length ? `· ${list.length}` : "";
+  $("chatList").innerHTML = list.length ? list.map(c => `<div class="chat-item ${c.chat_id === S.sel ? "sel" : ""}" onclick="selectChat('${c.chat_id}')">
+      <div class="n">${esc(c.name || c.chat_id)}${c.unread ? `<span class="badge">${c.unread}</span>` : ""}</div>
+      <div class="mono muted">${c.chat_id} · #${c.lastSeen} · ${c.participants.length} 人</div></div>`).join("")
+    : `<div class="hint">${S.ws ? "還沒有聊天室，建立一個吧。" : "連線後顯示。"}</div>`;
+}
+function renderMsgs() {
+  const c = S.sel && S.chats[S.sel];
+  if (!c) { $("chatTitle").textContent = "訊息"; $("chatMeta").textContent = "選一個聊天室"; $("msgs").innerHTML = ""; return; }
+  $("chatTitle").textContent = c.name || c.chat_id;
+  $("chatMeta").innerHTML = `${c.chat_id} · shard ${crc32("c:" + c.chat_id) % (S.meta ? S.meta.num_shards : 16)} · 成員：${c.participants.map(esc).join(", ")}`;
+  const el = $("msgs"), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  const rows = [...c.msgs.values()].sort((a, b) => a.message_id - b.message_id).slice(-300).map(m => {
+    const me = m.created_by === S.user, sys = m.kind === "system";
+    return `<div class="msg ${sys ? "sys" : me ? "me" : ""}"><div class="meta"><span class="id">#${m.message_id}</span> · ${esc(m.created_by)}${m.catchup ? " · 補收" : ""}${m.repaired ? " · 補送" : ""}${m.owner ? " · " + esc(m.owner) : ""}</div>${esc(m.text)}</div>`;
+  });
+  const pend = Object.values(S.pending).filter(p => p.chat_id === c.chat_id).map(p =>
+    `<div class="msg me ${p.state}"><div class="meta">${p.state === "failed" ? `送出失敗 ${esc(p.error || "")} · <a href="#" onclick="resend('${p.client_msg_id}');return false" style="color:#ffb4ae">用同一個 client_msg_id 重送</a>` : p.state === "persisted" ? `#${p.message_id} 已持久化，等待 fan-out…` : "送出中…"}</div>${esc(p.text)}</div>`);
+  el.innerHTML = rows.join("") + pend.join("");
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+function renderOrder() {
+  const c = S.sel && S.chats[S.sel];
+  if (!c) { $("order").innerHTML = ""; return; }
+  const ids = [...c.msgs.keys()].sort((a, b) => a - b), from = ids[0] || 0;
+  const holes = ids.length ? (ids[ids.length - 1] - from + 1) - ids.length : 0;
+  $("order").innerHTML = [
+    `<span class="pill ${holes || c.buffer.size ? "warn" : "ok"}">${holes || c.buffer.size ? `缺 ${holes} 則、緩衝 ${c.buffer.size}` : "順序 OK · 連號無缺"}</span>`,
+    `<span class="pill">已看到 #${c.lastSeen}</span>`,
+    `<span class="pill ${c.gapFills ? "warn" : ""}">跳號補拉 ${c.gapFills}</span>`,
+    `<span class="pill ${c.reorders ? "warn" : ""}">亂序重排 ${c.reorders}</span>`,
+    `<span class="pill ${c.dups ? "warn" : ""}">重複丟棄 ${c.dups}</span>`,
+    `<span class="pill">離線補收 ${c.catchup}</span>`,
+    `<span class="pill">搬家補送 ${c.repaired}</span>`,
+  ].join("");
+}
+function pct(a, p) { if (!a.length) return "—"; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))].toFixed(0) + " ms"; }
+function renderLat() {
+  const a = S.ack.slice(-50), e = S.echo.slice(-50);
+  $("lat").innerHTML = `<span>ack_ms</span><span>last ${a.length ? a[a.length - 1].toFixed(0) + " ms" : "—"} · p50 ${pct(a, .5)} · p95 ${pct(a, .95)}</span>
+    <span>echo_ms</span><span>last ${e.length ? e[e.length - 1].toFixed(0) + " ms" : "—"} · p50 ${pct(e, .5)} · p95 ${pct(e, .95)}</span>
+    <span>gateway</span><span class="mono">${esc(S.gateway || "—")}</span>`;
+}
+
+// ---------- cluster ----------
+const COLORS = ["#4f8cff", "#3fb950", "#d29922", "#bc8cff", "#ff7b72", "#39c5cf"];
+const colorOf = {}; let ci = 0;
+function nodeColor(n) { if (!n) return null; if (!colorOf[n]) colorOf[n] = COLORS[ci++ % COLORS.length]; return colorOf[n]; }
+async function pollCluster() {
+  try { S.cluster = await (await fetch(apiBase() + "api/cluster")).json(); } catch (e) { return; }
+  const d = S.cluster, hl = S.sel ? crc32("c:" + S.sel) % d.num_shards : -1;
+  $("grid").innerHTML = d.shards.map(s => s.node_id
+    ? `<div class="cell ${s.shard === hl ? "hl" : ""}" style="background:${nodeColor(s.node_id)}" title="shard ${s.shard} → ${s.node_id}">${s.shard}</div>`
+    : `<div class="cell none ${s.shard === hl ? "hl" : ""}" title="shard ${s.shard}：無 owner（等待接手）">${s.shard}</div>`).join("");
+  const counts = {}; d.shards.forEach(s => { if (s.node_id) counts[s.node_id] = (counts[s.node_id] || 0) + 1; });
+  const single = S.meta && S.meta.mode === "single";
+  $("nodes").innerHTML = d.nodes.map(n => `<div class="node"><span class="sw" style="background:${nodeColor(n.node_id)}"></span>
+      <b>${esc(n.node_id)}</b><span class="muted">${counts[n.node_id] || 0} shards · link ${d.links[n.node_id] ? "✓" : "✗"}</span>
+      <span style="margin-left:auto">${!single && S.meta && S.meta.allow_debug ? `<button class="ghost sm" onclick="kill('${n.node_id}','graceful')">graceful 下線</button>
+      <button class="danger sm" onclick="kill('${n.node_id}','hard')">hard kill</button>` : ""}</span></div>`).join("")
+    + `<div class="hint mono">gateway ${esc(d.gateway_id)} · etcd ${d.etcd_connected === null ? "—" : d.etcd_connected ? "✓" : "✗"} · rev ${d.revision} · 連線 ${d.connections} · 訂閱 ${d.topics_subscribed}/${d.topics_wanted}</div>`;
+  $("history").innerHTML = (d.history || []).slice().reverse().map(h =>
+    `${new Date(h.t * 1000).toLocaleTimeString()}  shard ${String(h.shard).padStart(2)}: ${h.from || "∅"} → ${h.to || "∅（等待接手）"}`).join("\n") || "（尚無）";
+}
+window.kill = async (node, mode) => {
+  if (!confirm(`${mode === "hard" ? "hard kill（直接結束 process）" : "graceful 下線（revoke lease）"} ${node}？`)) return;
+  const r = await fetch(apiBase() + "api/debug/kill", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ node_id:node, mode }) });
+  plog("out", { type:"debug/kill", node, mode, status:r.status });
+};
+
+// ---------- utils ----------
+const CRC = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(str) { const b = new TextEncoder().encode(str); let c = 0xFFFFFFFF; for (const x of b) c = CRC[(c ^ x) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+const PLOG = [];
+function plog(dir, f) {
+  const s = JSON.stringify(f); PLOG.push(`<span class="${dir}">${dir === "in" ? "←" : "→"} ${esc(s.length > 220 ? s.slice(0, 220) + "…" : s)}</span>`);
+  if (PLOG.length > 60) PLOG.shift(); $("plog").innerHTML = PLOG.slice().reverse().join("\n");
+}
+setInterval(() => { if (S.ws && S.ws.readyState === 1) send({ type:"ping", t:Date.now() }); }, 25000);
+</script>
+</body>
+</html>
