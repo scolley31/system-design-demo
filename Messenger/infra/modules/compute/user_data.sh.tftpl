@@ -1,0 +1,99 @@
+#!/bin/bash
+set -euxo pipefail
+
+dnf update -y
+dnf install -y docker
+systemctl enable --now docker
+
+# 部署腳本：從 SSM 撈設定 → ECR 登入 → pull → 優雅停舊容器 → 起新容器。
+# 開機時執行一次；CI/CD 也用 SSM run-command 呼叫同一支腳本做重新部署
+# （pubsub 一次一台、gateway 一次一半，見 .github/workflows/deploy-messenger.yml）。
+# ROLE 由 Terraform 依 ASG（gateway / pubsub）注入。
+cat > /usr/local/bin/deploy-app.sh <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+REGION="${region}"
+PREFIX="${ssm_prefix}"
+ROLE="${role}"
+
+get() {
+  aws ssm get-parameter --region "$REGION" --name "$1" --with-decryption \
+    --query Parameter.Value --output text 2>/dev/null || echo ""
+}
+
+IMAGE_URI="$(get "$PREFIX/IMAGE_URI")"
+if [ -z "$IMAGE_URI" ] || [ "$IMAGE_URI" = "None" ]; then
+  echo "IMAGE_URI not set yet; nothing to deploy."
+  exit 0
+fi
+
+ETCD_URL="$(get "${etcd_url_param}")"
+DYNAMO_TABLE_PREFIX="$(get "$PREFIX/DYNAMO_TABLE_PREFIX")"
+NUM_SHARDS="$(get "$PREFIX/NUM_SHARDS")"
+LEASE_TTL_S="$(get "$PREFIX/LEASE_TTL_S")"
+MAX_PARTICIPANTS="$(get "$PREFIX/MAX_PARTICIPANTS")"
+ALLOW_DEBUG="$(get "$PREFIX/ALLOW_DEBUG")"
+AUTH_ENABLED="$(get "$PREFIX/AUTH_ENABLED")"
+COGNITO_REGION="$(get "$PREFIX/COGNITO_REGION")"
+COGNITO_USER_POOL_ID="$(get "$PREFIX/COGNITO_USER_POOL_ID")"
+COGNITO_CLIENT_ID="$(get "$PREFIX/COGNITO_CLIENT_ID")"
+
+# IMDSv2：instance id（NODE_ID / log stream）+ 私有 IP（pubsub 寫進 etcd 的 advertise 位址）
+TOKEN="$(curl -s -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')"
+IID="$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)"
+IP="$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)"
+
+%{ if role == "pubsub" ~}
+# pubsub：shard owner。gateway 從 etcd 讀到 ADVERTISE_WS 後直連 /internal/ws（SG 只開 8041 給 gateway）
+NODE_ID="pubsub-$IID"
+PORT=8041
+ADVERTISE_WS="ws://$IP:8041/internal/ws"
+ADVERTISE_HTTP="http://$IP:8041"
+%{ else ~}
+# gateway：stateless WebSocket 入口，掛在 ALB target group（port 8031）
+NODE_ID="gw-$IID"
+PORT=8031
+# gateway 不讀 ADVERTISE_*（只有 pubsub 會註冊進 etcd），照填以保持 env 一致
+ADVERTISE_WS="ws://$IP:8031/internal/ws"
+ADVERTISE_HTTP="http://$IP:8031"
+%{ endif ~}
+
+REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+docker pull "$IMAGE_URI"
+
+# 優雅下線：SIGTERM → pubsub 先 fence 再 revoke etcd lease → shard 立刻由其他 pubsub 接手
+# （不用等 LEASE_TTL_S 過期）；gateway 則關閉 client 連線，client 自動重連到其他 gateway。
+# uvicorn --timeout-graceful-shutdown 5 → 10 秒內一定結束。
+docker stop -t 10 messenger 2>/dev/null || true
+docker rm -f messenger 2>/dev/null || true
+
+# Monitoring：app 日誌送 CloudWatch Logs（awslogs driver；metric filter 抓 shard_takeover 等）
+# --network host：容器直接用 instance IP / port，ADVERTISE_* 才是 gateway 連得到的位址
+docker run -d --name messenger --restart unless-stopped --network host \
+  --log-driver=awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$PREFIX/app" \
+  --log-opt awslogs-create-group=true \
+  --log-opt awslogs-stream="$ROLE/$IID" \
+  -e ROLE="$ROLE" \
+  -e NODE_ID="$NODE_ID" \
+  -e PORT="$PORT" \
+  -e ADVERTISE_WS="$ADVERTISE_WS" \
+  -e ADVERTISE_HTTP="$ADVERTISE_HTTP" \
+  -e ETCD_URL="$ETCD_URL" \
+  -e NUM_SHARDS="$NUM_SHARDS" \
+  -e LEASE_TTL_S="$LEASE_TTL_S" \
+  -e DYNAMO_TABLE_PREFIX="$DYNAMO_TABLE_PREFIX" \
+  -e MAX_PARTICIPANTS="$MAX_PARTICIPANTS" \
+  -e ALLOW_DEBUG="$ALLOW_DEBUG" \
+  -e AUTH_ENABLED="$AUTH_ENABLED" \
+  -e COGNITO_REGION="$COGNITO_REGION" \
+  -e COGNITO_USER_POOL_ID="$COGNITO_USER_POOL_ID" \
+  -e COGNITO_CLIENT_ID="$COGNITO_CLIENT_ID" \
+  -e AWS_DEFAULT_REGION="$REGION" \
+  "$IMAGE_URI"
+SCRIPT
+
+chmod +x /usr/local/bin/deploy-app.sh
+/usr/local/bin/deploy-app.sh || true

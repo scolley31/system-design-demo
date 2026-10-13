@@ -1,0 +1,103 @@
+name: Deploy Messenger to AWS
+
+# 目前為「手動觸發」（workflow_dispatch）。
+# infra 尚未 terraform apply 前，push 自動觸發會在 OIDC assume-role 失敗（無 messenger 角色/ECR）。
+# 待 infra apply + 設好 repo variable AWS_DEPLOY_ROLE_ARN（= terraform output gha_deploy_role_arn）後，
+# 再把下面 push: 區塊取消註解即可恢復「push 到 app 路徑自動部署」。
+on:
+  workflow_dispatch: {}
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "Messenger/**"
+  #     - "!Messenger/*.md"
+  #     - "!Messenger/*.pptx"
+  #     - "!Messenger/build_ppt.py"
+  #     - "!Messenger/infra/**"
+  #     - "!Messenger/loadtest/**"
+  #     - "!Messenger/scripts/**"
+  #     - ".github/workflows/deploy-messenger.yml"
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+  PROJECT: messenger
+  ECR_REPOSITORY: messenger
+  SSM_IMAGE_PARAM: /messenger/IMAGE_URI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # EC2 是 t4g (arm64)，runner 是 amd64 → 需用 QEMU + buildx 跨平台 build arm64
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push image (linux/arm64)
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE_URI="$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA::12}"
+          docker buildx build --platform linux/arm64 \
+            -t "$IMAGE_URI" -t "$REGISTRY/$ECR_REPOSITORY:latest" \
+            --push "Messenger"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Update IMAGE_URI in SSM
+        run: |
+          aws ssm put-parameter --name "$SSM_IMAGE_PARAM" --type String \
+            --value "$IMAGE_URI" --overwrite
+
+      # 兩段部署：
+      #   1) pubsub 一次一台（--max-concurrency 1）：SIGTERM → revoke etcd lease → 另一台立刻接手 shard，
+      #      同時間永遠只有一台在換 → 不會出現「所有 owner 同時下線」。
+      #   2) pubsub 全部成功後才換 gateway，一次一半（50%）：client 斷線後自動重連到另一半。
+      # etcd 帶的是 app=messenger-etcd tag，兩段都打不到它。
+      - name: Deploy to EC2 via SSM run-command (pubsub → gateway)
+        run: |
+          deploy_role() {
+            ROLE="$1"; CONCURRENCY="$2"
+            CMD_ID=$(aws ssm send-command \
+              --document-name "AWS-RunShellScript" \
+              --comment "Deploy $ROLE $IMAGE_URI" \
+              --targets "Key=tag:app,Values=$PROJECT" "Key=tag:role,Values=$ROLE" \
+              --max-concurrency "$CONCURRENCY" \
+              --max-errors 0 \
+              --parameters 'commands=["/usr/local/bin/deploy-app.sh"]' \
+              --query "Command.CommandId" --output text)
+            echo "[$ROLE] command: $CMD_ID"
+            for i in $(seq 1 60); do
+              sleep 6
+              STATUS=$(aws ssm list-command-invocations --command-id "$CMD_ID" \
+                --query "CommandInvocations[].Status" --output text || echo "")
+              echo "[$ROLE] status: $STATUS"
+              case "$STATUS" in
+                *Failed*|*Cancelled*|*TimedOut*) echo "[$ROLE] deploy failed"; return 1;;
+              esac
+              CMD_STATUS=$(aws ssm list-commands --command-id "$CMD_ID" \
+                --query "Commands[0].Status" --output text || echo "")
+              if [ "$CMD_STATUS" = "Success" ]; then
+                echo "[$ROLE] all targets succeeded"; return 0
+              fi
+            done
+            echo "[$ROLE] timed out waiting for deploy"; return 1
+          }
+          deploy_role pubsub 1
+          deploy_role gateway 50%

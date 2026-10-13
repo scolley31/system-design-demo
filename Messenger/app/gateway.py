@@ -384,6 +384,8 @@ class GatewayNode:
             c.send(_result(rid, "sendMessage", "SUCCESS", chat_id=chat_id, client_msg_id=cmid,
                            message_id=resp["message_id"], created_at=resp.get("created_at"), dup=resp.get("dup")))
         else:
+            logger.warning("publish_failed chat=%s user=%s code=%s detail=%s", chat_id, c.user_id, resp.get("code"),
+                           resp.get("detail"))  # CloudWatch metric filter 依此計數
             c.send(_result(rid, "sendMessage", "FAILURE", chat_id=chat_id, client_msg_id=cmid,
                            error=resp.get("code"), detail=resp.get("detail")))
 
