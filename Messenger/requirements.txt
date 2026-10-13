@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+# uvicorn 的 WebSocket 實作 + gateway→pub/sub 內部 WS client
+websockets==14.1
+# etcd v3 JSON gateway（不裝 grpcio：aetcd 要 grpc、python-etcd3 已停更）
+httpx==0.28.1
+# 正式版後端（env-gated；本機不設對應環境變數則不會用到）
+boto3==1.35.90
+pyjwt[crypto]==2.10.1
